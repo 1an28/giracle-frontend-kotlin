@@ -356,6 +356,7 @@ fun Composer(
             return
         }
         com.giracle.android.data.SendTrace.mark("tap")
+        com.giracle.android.data.SendTrace.profileAfterTap()
         val ids = attachments.mapNotNull { it.fileId }
         val reply = replyTo?.id
         // 送信前に入力欄を空にして、すぐ次を打てるようにする (失敗したら戻す)

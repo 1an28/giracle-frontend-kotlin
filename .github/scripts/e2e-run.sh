@@ -25,6 +25,8 @@ set -e
 "$ADB" install -r "$APP_APK"
 "$ADB" install -r -t "$TEST_APK"
 "$ADB" shell pm list instrumentation
+# 送信を押した直後のスタックと描画の間隔を記録させる (SendTrace.profileAfterTap、#70、D-068)。利用者の端末では付かない
+"$ADB" shell setprop log.tag.GiraclePerfTrace VERBOSE
 set +e
 # logcat の入れ物 (エミュレータは 2M) は、実行の間にあふれて古い行が消える (#81)。
 # 大きくしたうえで、実行の間ずっとファイルに流し続ける (終わってから -d で取り出すと、最後の数秒しか残らないことがある)
@@ -135,6 +137,20 @@ echo "::group::よく使う作業の手数と時間 (ux)"
 grep -oE "E2E-RESULT ux net=.*" "$OUT/logcat.txt" | sed "s/E2E-RESULT ux //"
 # 手がかり: 再同期・スナップショットからの復元・アプリのプロセスの起動 (つなぎ直した後の切り替えの値を読むため)・送信の区切り (GiraclePerf、#70)
 grep -E " I GiracleSync: | I GiraclePerf: | I GiracleE2E: E2E-RESULT ux|ActivityManager: Start proc [0-9]+:$APP_PKG" "$OUT/logcat.txt" | tail -n 60
+echo "::endgroup::"
+# 送信を押した直後の描画の間隔と、メイン・Default のスレッドのスタック (#70、D-068)。R8 の名前を mapping.txt で元に戻して出す
+echo "::group::送信を押した直後のスレッドのスタック (GiraclePerfTrace)"
+MAPPING=app/build/outputs/mapping/release/mapping.txt
+RETRACE=$(ls -d "$SDK"/cmdline-tools/*/bin/retrace 2>/dev/null | sort -V | tail -1)
+grep -E " GiraclePerfTrace: " "$OUT/logcat.txt" | sed -E 's/^.* GiraclePerfTrace: //' > "$OUT/perf-trace.txt"
+if [ -n "$RETRACE" ] && [ -f "$MAPPING" ]; then
+  "$RETRACE" "$MAPPING" "$OUT/perf-trace.txt" > "$OUT/perf-trace-retraced.txt" 2> "$OUT/retrace-err.txt" || echo "::warning::retrace が失敗した (下は元の名前のまま)"
+  [ -s "$OUT/perf-trace-retraced.txt" ] || cp "$OUT/perf-trace.txt" "$OUT/perf-trace-retraced.txt"
+else
+  echo "retrace か mapping.txt が無いので、R8 の名前のまま出す (retrace=$RETRACE)"
+  cp "$OUT/perf-trace.txt" "$OUT/perf-trace-retraced.txt"
+fi
+head -n 1500 "$OUT/perf-trace-retraced.txt"
 echo "::endgroup::"
 if [ $status = 0 ] && ! grep -q "E2E-RESULT ux_test=done net=fast" "$OUT/logcat.txt"; then
   echo "::error::よく使う作業の測定 (uxTasks) が最後まで動いていない"
