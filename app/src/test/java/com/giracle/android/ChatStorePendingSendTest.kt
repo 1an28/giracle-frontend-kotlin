@@ -51,6 +51,8 @@ class ChatStorePendingSendTest {
     @Volatile private var sendCode = 200
     @Volatile private var historyRequested = CountDownLatch(1)
     @Volatile private var historyRelease: CountDownLatch? = null
+    /** 取り直しの結果の先頭 (新しい側) に足すもの。サーバーが送ったものを保存済みのときに使う */
+    @Volatile private var historyHead: List<Message> = emptyList()
 
     @After fun tearDown() {
         sendRelease.countDown()
@@ -77,7 +79,8 @@ class ChatStorePendingSendTest {
                     path.contains("channel/get-history") -> {
                         historyRequested.countDown()
                         historyRelease?.await(30, TimeUnit.SECONDS)
-                        ok("""{"history":[${json(msg("2", t2))},${json(msg("1", t1))}],"atTop":true,"atEnd":true}""")
+                        val list = historyHead + listOf(msg("2", t2), msg("1", t1))
+                        ok("""{"history":[${list.joinToString(",") { json(it) }}],"atTop":true,"atEnd":true}""")
                     }
                     path.contains("message/send") -> {
                         sendRequested.countDown()
@@ -193,6 +196,33 @@ class ChatStorePendingSendTest {
         historyRelease!!.countDown()
         refetch.await()
         assertEquals(listOf("r1", "2", "1"), ids(s))
+    }
+
+    @Test fun refetchContainingRealReplacesPending() = runBlocking {
+        // つなぎ直しの取り直しの結果に、もう保存された本物が入っている (応答はまだ返っていない)。仮のものと二重に見えない (#118 のレビュー)
+        val s = opened()
+        val local = s.addPending("ch", "こんにちは", null)
+        val send = scope.async { s.send("ch", "こんにちは", emptyList(), null, local) }
+        check(sendRequested.await(10, TimeUnit.SECONDS))
+        historyHead = listOf(real)
+        s.jumpToLatest("ch")
+        assertEquals(listOf("r1", "2", "1"), ids(s))
+        assertEquals("r1", s.resolveSent(local!!))
+        // 後から WebSocket で同じ本物が届いても、応答が返っても増えない
+        s.handle(wsSend(real))
+        assertEquals(listOf("r1", "2", "1"), ids(s))
+        sendRelease.countDown()
+        send.await()
+        assertEquals(listOf("r1", "2", "1"), ids(s))
+    }
+
+    @Test fun oldSameTextInRefetchDoesNotRemovePending() = runBlocking {
+        // 前の一覧にあった昔の同じ本文 (「ok」など) とは突き合わせない
+        historyHead = listOf(msg("old", "2026-11-14T00:00:03.000Z", user = "me", content = "ok"))
+        val s = opened()
+        val local = s.addPending("ch", "ok", null)
+        s.jumpToLatest("ch")
+        assertEquals(listOf(local, "old", "2", "1"), ids(s))
     }
 
     @Test fun pendingIsNotSavedNorUsedAsReadTime() = runBlocking {

@@ -156,9 +156,16 @@ class ChatStore(
      */
     private fun applyFetched(channelId: String, flow: MutableStateFlow<HistoryState>, state: HistoryState) {
         // 送信中の仮のもの (D-071) は、最新側まで取れた結果なら先頭に残す。応答が来たら本物に置き換わる
+        // ただし、結果に本物がもう入っていたら (つなぎ直しの取り直しで、応答より先にサーバーの保存が見えた) 外す。
+        // 外さないと、応答が返るまで二重に見える (#118 のレビュー)。突き合わせるのは前の一覧に無かったものだけ
+        // (前からある昔の同じ本文、例えば「ok」と取り違えないため)
         flow.update { old ->
             val pend = if (state.atEnd) old.messages.filter { it.pending } else emptyList()
-            if (pend.isEmpty()) state else state.copy(messages = pend + state.messages)
+            if (pend.isEmpty()) state else {
+                val oldIds = old.messages.mapTo(HashSet()) { it.id }
+                val left = withoutConfirmed(pend, state.messages.filter { it.id !in oldIds })
+                if (left.isEmpty()) state else state.copy(messages = left + state.messages)
+            }
         }
         if (state.atEnd) {
             flow.update { s ->
@@ -888,16 +895,19 @@ class ChatStore(
         val flow = histories[m.channelId] ?: return
         val myId = me.value?.id
         flow.update { s ->
-            if (s.messages.any { it.id == m.id }) return@update s
+            val hasReal = s.messages.any { it.id == m.id }
             // 自分の送信が WebSocket で応答より先に届いたら、手元に出している仮のもの (D-071) と置き換える。
-            // サーバーに重複を防ぐ ID が無い (S-8) ので、同じ本文・同じ返信先で、いちばん古い仮のものと突き合わせる
+            // サーバーに重複を防ぐ ID が無い (S-8) ので、同じ本文・同じ返信先で、いちばん古い仮のものと突き合わせる。
+            // 本物がもう一覧にあっても (取り直しの結果で入った)、仮のものが残っていれば外す
             if (m.userId == myId) {
                 val i = s.messages.indexOfLast { it.pending && sameSend(it, m) }
                 if (i >= 0) {
                     confirmedIds[s.messages[i].id] = m.id
-                    return@update s.copy(messages = insertConfirmed(s.messages.filterIndexed { j, _ -> j != i }, m), version = s.version + 1)
+                    val rest = s.messages.filterIndexed { j, _ -> j != i }
+                    return@update s.copy(messages = if (hasReal) rest else insertConfirmed(rest, m), version = s.version + 1)
                 }
             }
+            if (hasReal) return@update s
             // キャッシュには足さない (切れていた間の投稿が抜けたまま、新着だけが続いて見えるため。開いたときに取り直す)
             if (!s.loaded || !s.atEnd || s.fromCache) s
             else s.copy(messages = insertConfirmed(s.messages, m), version = s.version + 1)
@@ -916,7 +926,7 @@ class ChatStore(
         for (r in confirmed) {
             if (r.userId != myId) continue
             val i = left.indexOfLast { sameSend(it, r) }
-            if (i >= 0) left.removeAt(i)
+            if (i >= 0) confirmedIds[left.removeAt(i).id] = r.id
         }
         return left
     }
