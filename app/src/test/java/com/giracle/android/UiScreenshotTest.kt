@@ -193,6 +193,43 @@ class UiScreenshotTest {
         back(TestTags.SCREEN_HOME)
     }
 
+    /** 使っている途中でリアルタイム接続が切れたら、チャンネルの題名の下に出し、つながったら消す (D-073) */
+    @Test fun connectionLostInChannel() {
+        assumeTrue(server != null)
+        val ch = newChannel("conn")
+        val latest = send(ch, "接続の知らせの確認")
+        startApp()
+        click(TestTags.homeChannel(ch))
+        waitTag(TestTags.message(latest))
+        val graph = ApplicationProvider.getApplicationContext<GiracleApp>().graph
+        rule.waitUntil(10_000) { graph.ws.state.value == com.giracle.android.data.net.WsClient.State.Connected }
+        assertTrue(!exists(hasTestTag(TestTags.CONNECTION_NOTICE)))
+        // 切る (stop は自分からはつなぎ直さない)。少し続いたら知らせが出る
+        rule.runOnUiThread { graph.ws.stop() }
+        // 3 秒たつまでは出さない (ちらつかせない)
+        advance(2_500)
+        assertTrue(!exists(hasTestTag(TestTags.CONNECTION_NOTICE)))
+        awaitAdvancing { exists(hasText("オフライン", substring = true)) }; shot("09_connection_lost")
+        rule.runOnUiThread { graph.ws.start() }
+        awaitAdvancing { exists(hasText("つながりました")) }; shot("09b_reconnected")
+        awaitAdvancing { !exists(hasTestTag(TestTags.CONNECTION_NOTICE)) }
+    }
+
+    /**
+     * 画面の時計を進めながら待つ。画面側の待ち (delay) は画面の時計で進むので、`waitUntil` だけでは進まない
+     * (ComposerDraftTest の await と同じ)
+     */
+    private fun awaitAdvancing(ms: Long = 15_000, cond: () -> Boolean) {
+        val end = System.currentTimeMillis() + ms
+        while (!cond()) {
+            check(System.currentTimeMillis() < end) { "${ms}ms 待っても条件が満たされない" }
+            advance(100)
+            Thread.sleep(20)
+        }
+    }
+
+    private fun advance(ms: Long) { rule.mainClock.advanceTimeBy(ms); rule.waitForIdle() }
+
     @Test fun imageViewer() {
         assumeTrue(server != null)
         val ch = newChannel("image")

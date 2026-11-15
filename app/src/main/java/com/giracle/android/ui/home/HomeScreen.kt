@@ -91,7 +91,7 @@ fun HomeScreen(loading: Boolean, showConnection: Boolean = true) {
     val online by store.online.collectAsStateWithLifecycle()
     val muted by store.mutedChannels.collectAsStateWithLifecycle()
     val roles by store.roles.collectAsStateWithLifecycle()
-    val wsState by graph.ws.state.collectAsStateWithLifecycle()
+    val connection by com.giracle.android.ui.common.rememberConnectionNotice(graph.ws)
     var reorder by rememberSaveable { mutableStateOf(false) }
     var confirmReadAll by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -148,13 +148,9 @@ fun HomeScreen(loading: Boolean, showConnection: Boolean = true) {
         LazyColumn(Modifier.fillMaxSize().padding(pad)) {
             item(key = "status", contentType = "status") {
                 if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                else if (showConnection && wsState != WsClient.State.Connected) {
-                    val label = when (wsState) {
-                        WsClient.State.Connecting -> "接続中…"
-                        WsClient.State.AuthError -> "リアルタイム接続が拒否されました (サーバーの CORS_ORIGIN 設定を確認)"
-                        else -> "オフライン — 再接続を待っています"
-                    }
-                    Text(label, Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp), style = MaterialTheme.typography.bodySmall)
+                // 切れてすぐには出さない (ちらつかせない)。チャンネルの画面と同じ知らせを使う (D-073)
+                else if (showConnection) connection.label?.let { label ->
+                    Text(label, Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp).testTag(TestTags.CONNECTION_NOTICE), style = MaterialTheme.typography.bodySmall)
                 }
             }
             // 他のアプリから共有されたものがあるとき、送り先のチャンネルを選んでもらう (D-020)

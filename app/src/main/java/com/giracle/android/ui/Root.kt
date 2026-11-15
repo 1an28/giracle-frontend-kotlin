@@ -165,7 +165,7 @@ private fun SignedIn(p: AppPhase.SignedIn, graph: AppGraph, pendingOpen: Mutable
             // me の有無では決めない (ログイン直後に、一部の読み込みだけ成功して me が入る場合がある)
             if (failed && !restored) {
                 LoadError(p.error, loading = loading, onRetry = graph::retryLoad)
-            } else Column(Modifier.fillMaxSize()) {
+            } else androidx.compose.runtime.CompositionLocalProvider(com.giracle.android.ui.common.LocalLoadFailedBannerShown provides failed) { Column(Modifier.fillMaxSize()) {
                 if (failed) OfflineBanner(loading = loading, onRetry = graph::retryLoad)
                 val screen = nav.current
                 // 帯が上の余白 (状態バー) を受け持つので、下の画面の上の帯 (TopAppBar) が二重に空けないようにする
@@ -221,7 +221,7 @@ private fun SignedIn(p: AppPhase.SignedIn, graph: AppGraph, pendingOpen: Mutable
                         }
                     }
                 }
-            }
+            } }
             NoticeBanner(store.notices, nav)
         }
     }

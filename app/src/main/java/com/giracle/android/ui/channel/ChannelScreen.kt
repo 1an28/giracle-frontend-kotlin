@@ -120,6 +120,8 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
     val readBefore by store.readTimesBefore.collectAsStateWithLifecycle()
     val inbox by store.inbox.collectAsStateWithLifecycle()
     val settings by graph.prefs.settings.collectAsStateWithLifecycle()
+    val connection by com.giracle.android.ui.common.rememberConnectionNotice(graph.ws)
+    val loadFailedBanner = com.giracle.android.ui.common.LocalLoadFailedBannerShown.current
     val channel = channels.firstOrNull { it.id == channelId }
     val joined = me?.channelJoin?.any { it.channelId == channelId } == true
 
@@ -346,7 +348,15 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
                             Icon(if (channel?.viewableRole?.isNotEmpty() == true) Icons.Default.Lock else AppIcons.Tag, null, Modifier.size(18.dp))
                             Text(channel?.name ?: "…", maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
                         }
-                        if (!channel?.description.isNullOrBlank()) {
+                        // 接続が切れている間は、題名の下の行 (説明) を接続の知らせに差し替える (Telegram と同じ形。一覧の場所を取らない、P-5。D-073)。
+                        // 読み込みに失敗した帯 (D-057) が出ている間は、そちらが知らせるので重ねない
+                        val notice = connection.label?.takeIf { !loadFailedBanner }
+                        if (notice != null) {
+                            Text(
+                                notice, Modifier.testTag(TestTags.CONNECTION_NOTICE), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = if (connection == com.giracle.android.ui.common.ConnectionNotice.Reconnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            )
+                        } else if (!channel?.description.isNullOrBlank()) {
                             Text(channel.description, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

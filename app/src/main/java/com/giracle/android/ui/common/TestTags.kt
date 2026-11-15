@@ -17,6 +17,8 @@ object TestTags {
     /** 読み込みに失敗し、前回の内容を出しているときの帯 (#82) */
     const val OFFLINE_BANNER = "app.offline_banner"
     const val OFFLINE_RETRY = "app.offline_retry"
+    /** リアルタイム接続が切れている・つなぎ直した、の知らせ (D-073) */
+    const val CONNECTION_NOTICE = "app.connection_notice"
     /** 出せる内容が何も無いときの、画面全体の読み込みの失敗 */
     const val LOAD_ERROR = "app.load_error"
     /** 幅の広い画面で、チャンネルを開いていないときの右側 (#29) */

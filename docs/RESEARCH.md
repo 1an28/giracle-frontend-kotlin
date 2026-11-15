@@ -175,3 +175,18 @@
 - 確かめていないこと: FCM が Web Push の Urgency を優先度にどう写すか。公式の説明は見つからず、開発者の報告 (GitHub の Issue・PR。例: arteeh/uniichat #70) では、Urgency を付けないと normal 扱いで、待機中に遅れるという
 - 推測: 端末が待機中だと、メンションや返信の通知が数分から次の保守の時間まで遅れる場合がありうる。本番で起きているかは分からない (実機・本番の確認は持ち主の手が要るので前提にしない、D-024)
 - 次: サーバー側の選択肢を SERVER_CHANGES.md の S-9 に書いた。アプリ側だけでできることは見つかっていない (急ぎ度は送る側が決める)
+
+### 使っている途中で接続が切れたことを、チャンネルの画面でどう見せるか
+- 入り口: ROADMAP の「P-2 の続き」。今はホームの 1 行にしか出ず、チャンネルを読んでいる人は新着が止まったことに気づけない。
+  「切れたらすぐ出す」のが正直だと思っていたが、すぐ出すと前面に戻るたびのつなぎ直しでちらつくのでは、と疑った
+- 確かめたこと (公開されているコードを読んだ。2026-11-15 の既定の枝):
+  - Telegram Android (DrKLO/Telegram の `ChatAvatarContainer.java`): チャットの画面では、上の帯の題名の下の行 (相手の状態などを出す行) を、
+    接続の状態で `Waiting for network...`・`Connecting...`・`Updating...`・`Connecting to proxy` に差し替え、戻ったら元の行に戻す (`strings.xml` の文言)。
+    一覧の場所を取らない形。出すまでに待つかは、この画面のコードからは読み取れなかった (接続の層の側は読んでいない)
+  - Element (element-web の `apps/web/src/viewmodels/room/RoomStatusBar.ts`): ルームの画面の下に「Connectivity to the server has been lost.」
+    「Sent messages will be stored until your connection has returned.」を出す。出すのは同期の状態が `Error` のときだけ。
+    matrix-js-sdk の `sync.ts` は、同期の失敗が `FAILED_SYNC_ERROR_THRESHOLD` (3) 回続くまで `Reconnecting` に留め、`Error` にしない。
+    つまり、1 回の失敗ではすぐに出さない
+- 推測: 「短い切れ目では出さない」「出すなら読む場所を奪わない」の 2 つは、良いとされるアプリで共通している。
+  Slack は公式のヘルプに灰色の帯で WebSocket の問題を出すと書く (検索結果の要約まで。原文は読んでいない)
+- 次: D-073 で、チャンネルの題名の下の行に、3 秒続いたら出す形にした
