@@ -163,3 +163,14 @@
 - 確かめたこと (検索結果の要約まで。原文は開いていない): 2026 年の「おすすめ」のまとめ記事は、WhatsApp (多く使われている)・Signal (秘匿)・Telegram (機能・大きいファイル)・Discord (コミュニティ) を挙げる。
   要約で見る限り、多くはアフィリエイト型のまとめや開発会社の宣伝で、同期の速さ・通知の確かさ・送信の手応えを比べたものは見当たらなかった (原文は未読)
 - 判断 (D-072): 順位で選ばない。比べたい点ごとに、その点で評価されているアプリの公式の説明・設計の資料を読んで比べる
+
+### 通知は、待機中の端末にも遅れずに届くか
+- 入り口: 作業の選び方を「利用者が感じることが良くなるか」に変えた (D-069・D-070)。通知に気づけるかは利用者に直結するのに、届く速さを一度も疑っていなかった
+- 確かめたこと:
+  - backend (`87be860`) の `src/Utils/SendPushNotification.ts` は `webpush.sendNotification(subscription, payload)` をオプション無しで呼ぶ。`web-push` の README では Urgency の既定は `normal`、TTL は 4 週間
+  - RFC 8030 の 5.3 (https://www.rfc-editor.org/rfc/rfc8030#section-5.3): `normal` は電源にも Wi-Fi にもつながっていない端末にも届けてよい急ぎ度で、例はチャットやカレンダー。Urgency が無ければ `normal`
+  - FCM の公式の説明 (https://firebase.google.com/docs/cloud-messaging/android/message-priority): 優先度 normal は、Doze のとき抜けるまで遅れうる。high は待機中でもすぐ届けようとする
+  - このアプリは、配信アプリが無ければ組み込みの FCM 配信 (UnifiedPush の embedded FCM distributor) で Web Push を受ける (PushRegistrar.kt)
+- 確かめていないこと: FCM が Web Push の Urgency を優先度にどう写すか。公式の説明は見つからず、開発者の報告 (GitHub の Issue・PR。例: arteeh/uniichat #70) では、Urgency を付けないと normal 扱いで、待機中に遅れるという
+- 推測: 端末が待機中だと、メンションや返信の通知が数分から次の保守の時間まで遅れる場合がありうる。本番で起きているかは分からない (実機・本番の確認は持ち主の手が要るので前提にしない、D-024)
+- 次: サーバー側の選択肢を SERVER_CHANGES.md の S-9 に書いた。アプリ側だけでできることは見つかっていない (急ぎ度は送る側が決める)
