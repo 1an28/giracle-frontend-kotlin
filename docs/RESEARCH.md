@@ -169,7 +169,8 @@
 - 確かめたこと:
   - backend (`87be860`) の `src/Utils/SendPushNotification.ts` は `webpush.sendNotification(subscription, payload)` をオプション無しで呼ぶ。`web-push` の README では Urgency の既定は `normal`、TTL は 4 週間
   - RFC 8030 の 5.3 (https://www.rfc-editor.org/rfc/rfc8030#section-5.3): `normal` は電源にも Wi-Fi にもつながっていない端末にも届けてよい急ぎ度で、例はチャットやカレンダー。Urgency が無ければ `normal`
-  - FCM の公式の説明 (https://firebase.google.com/docs/cloud-messaging/android/message-priority): 優先度 normal は、Doze のとき抜けるまで遅れうる。high は待機中でもすぐ届けようとする
+  - FCM の公式の説明 (https://firebase.google.com/docs/cloud-messaging/android/message-priority): 優先度 normal は、Doze のとき抜けるまで遅れうる。high は待機中でもすぐ届けようとする。
+    high のメッセージで利用者に見える通知を出さないと、normal に格下げされうる (同じ説明の「Deprioritization of high priority FCM on Android」)
   - このアプリは、配信アプリが無ければ組み込みの FCM 配信 (UnifiedPush の embedded FCM distributor) で Web Push を受ける (PushRegistrar.kt)
 - 確かめていないこと: FCM が Web Push の Urgency を優先度にどう写すか。公式の説明は見つからず、開発者の報告 (GitHub の Issue・PR。例: arteeh/uniichat #70) では、Urgency を付けないと normal 扱いで、待機中に遅れるという
 - 推測: 端末が待機中だと、メンションや返信の通知が数分から次の保守の時間まで遅れる場合がありうる。本番で起きているかは分からない (実機・本番の確認は持ち主の手が要るので前提にしない、D-024)
