@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -118,12 +119,14 @@ fun MessageItem(
             SystemMessage(m, cb)
         } else {
             m.replyingMessageId?.let { ReplyPreview(it, m.channelId, cb) }
-            SwipeToReply(enabled = cb.onSwipeReply != null, onReply = { cb.onSwipeReply?.invoke(m) }) {
+            // 送信中の仮のもの (D-070) は、サーバーに無い id なので操作 (返信・リアクション・編集など) を受けない
+            SwipeToReply(enabled = cb.onSwipeReply != null && !m.pending, onReply = { cb.onSwipeReply?.invoke(m) }) {
             Row(
                 Modifier.fillMaxWidth()
                     .testTag(TestTags.message(m.id))
                     .background(if (highlighted) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                    .combinedClickable(onClick = {}, onLongClick = { cb.onLongPress(m) })
+                    .then(if (m.pending) Modifier.alpha(0.6f) else Modifier)
+                    .combinedClickable(onClick = {}, onLongClick = { if (!m.pending) cb.onLongPress(m) })
                     .padding(start = 12.dp, end = 12.dp, top = if (showHeader) 8.dp else 1.dp, bottom = 2.dp),
             ) {
                 Box(Modifier.width(44.dp)) {
@@ -149,7 +152,8 @@ private fun Header(m: Message, cb: MessageCallbacks) {
             modifier = Modifier.weight(1f, fill = false).clickable { cb.onUserClick(m.userId) },
         )
         if (u?.isBot == true) Badge("BOT")
-        Text(friendlyTime(m.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // 送信中は時刻の代わりに印を出す (高さを変えないため、同じ場所・同じ文字の大きさ)
+        Text(if (m.pending) "送信中…" else friendlyTime(m.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
