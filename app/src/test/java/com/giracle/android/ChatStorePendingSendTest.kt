@@ -38,7 +38,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * 送信を押した直後に、応答を待たずに仮のものを一覧に出す (D-070)。
+ * 送信を押した直後に、応答を待たずに仮のものを一覧に出す (D-071)。
  * 応答・WebSocket で本物が届いたら置き換わり (二重に見えない・消えない)、失敗したら消える。
  */
 @RunWith(RobolectricTestRunner::class)

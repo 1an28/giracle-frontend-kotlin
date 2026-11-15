@@ -155,7 +155,7 @@ class ChatStore(
      * 先に結果を入れてから控えを外す。逆の順だと、外してから入れるまでの間に届いた新着が、古い一覧に足されて結果で上書きされる (#84 のレビュー)
      */
     private fun applyFetched(channelId: String, flow: MutableStateFlow<HistoryState>, state: HistoryState) {
-        // 送信中の仮のもの (D-070) は、最新側まで取れた結果なら先頭に残す。応答が来たら本物に置き換わる
+        // 送信中の仮のもの (D-071) は、最新側まで取れた結果なら先頭に残す。応答が来たら本物に置き換わる
         flow.update { old ->
             val pend = if (state.atEnd) old.messages.filter { it.pending } else emptyList()
             if (pend.isEmpty()) state else state.copy(messages = pend + state.messages)
@@ -298,7 +298,7 @@ class ChatStore(
         val u = me.value ?: return null
         val hs = histories.mapNotNull { (id, f) ->
             val v = f.value
-            // 送信中の仮のもの (D-070) は保存しない (次の起動でサーバーに無いものが残るため)
+            // 送信中の仮のもの (D-071) は保存しない (次の起動でサーバーに無いものが残るため)
             val msgs = v.messages.filterNot { it.pending }
             if (v.loaded && v.atEnd && msgs.isNotEmpty()) id to msgs.take(perChannel) else null
         }.toMap()
@@ -504,7 +504,7 @@ class ChatStore(
         val flow = hist(channelId)
         val s = flow.value
         if (!s.loaded || s.atEnd || s.loadingNewer || s.fromCache) return
-        // 送信中の仮のもの (D-070) の id はサーバーに無いので、続きの起点にしない
+        // 送信中の仮のもの (D-071) の id はサーバーに無いので、続きの起点にしない
         val newest = s.messages.firstOrNull { !it.pending } ?: return
         flow.update { it.copy(loadingNewer = true) }
         lock(channelId).withLock {
@@ -568,7 +568,7 @@ class ChatStore(
         val s = hist(channelId).value
         // キャッシュ (切れていた間の投稿が抜けているかもしれない) の最新で既読にすると、見ていない投稿まで既読になる。取り直してから既読にする
         if (!s.atEnd || s.fromCache) return
-        // 送信中の仮のもの (D-070) の時刻は端末の時計なので、既読の時刻にしない
+        // 送信中の仮のもの (D-071) の時刻は端末の時計なので、既読の時刻にしない
         val newest = s.messages.firstOrNull { !it.pending }?.createdAt ?: return
         val current = readTimes.value[channelId]
         if (current != null && !isAfter(newest, current)) {
@@ -628,7 +628,7 @@ class ChatStore(
     // ------------------------------------------------------------------
 
     /**
-     * 送信を押した直後に、応答を待たずに仮のメッセージを一覧の先頭に出す (D-070)。出した仮のものの id を返す。
+     * 送信を押した直後に、応答を待たずに仮のメッセージを一覧の先頭に出す (D-071)。出した仮のものの id を返す。
      * 最新側を出していない・キャッシュを出しているときは出さず null (応答の後に今までどおり足す。[addMessage] と同じ条件)。
      * 仮のものは、応答か WebSocket で本物が届いたら置き換わり、送信に失敗したら消える ([send])
      */
@@ -889,7 +889,7 @@ class ChatStore(
         val myId = me.value?.id
         flow.update { s ->
             if (s.messages.any { it.id == m.id }) return@update s
-            // 自分の送信が WebSocket で応答より先に届いたら、手元に出している仮のもの (D-070) と置き換える。
+            // 自分の送信が WebSocket で応答より先に届いたら、手元に出している仮のもの (D-071) と置き換える。
             // サーバーに重複を防ぐ ID が無い (S-8) ので、同じ本文・同じ返信先で、いちばん古い仮のものと突き合わせる
             if (m.userId == myId) {
                 val i = s.messages.indexOfLast { it.pending && sameSend(it, m) }

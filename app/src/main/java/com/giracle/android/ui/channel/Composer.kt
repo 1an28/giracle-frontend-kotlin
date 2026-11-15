@@ -374,7 +374,7 @@ fun Composer(
         val sessionStore = graph.store
         // 送信待ちに入れるときのユーザー。押した時点で読む (失敗の後だと、ログアウトで消えていることがある、#74)
         val sessionUser = sessionStore.me.value?.id ?: graph.prefs.userId
-        // 応答を待たずに、送ったものを一覧に出す (送信中の印つき、D-070)。添付があるときは出さない (応答の後に今までどおり出る)
+        // 応答を待たずに、送ったものを一覧に出す (送信中の印つき、D-071)。添付があるときは出さない (応答の後に今までどおり出る)
         val localId = if (ids.isEmpty()) store.addPending(channelId, body, reply) else null
         if (localId != null) {
             com.giracle.android.data.SendTrace.mark("local_shown", "id=$localId")

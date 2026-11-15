@@ -119,7 +119,7 @@ fun MessageItem(
             SystemMessage(m, cb)
         } else {
             m.replyingMessageId?.let { ReplyPreview(it, m.channelId, cb) }
-            // 送信中の仮のもの (D-070) は、サーバーに無い id なので操作 (返信・リアクション・編集など) を受けない
+            // 送信中の仮のもの (D-071) は、サーバーに無い id なので操作 (返信・リアクション・編集など) を受けない
             SwipeToReply(enabled = cb.onSwipeReply != null && !m.pending, onReply = { cb.onSwipeReply?.invoke(m) }) {
             Row(
                 Modifier.fillMaxWidth()
