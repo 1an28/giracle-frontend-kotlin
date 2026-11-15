@@ -116,6 +116,11 @@ data class Message(
     @SerialName("MessageUrlPreview") val urlPreviews: List<UrlPreview> = emptyList(),
     @SerialName("MessageFileAttached") val files: List<FileAttached> = emptyList(),
     val reactionSummary: List<ReactionSummary> = emptyList(),
+    /**
+     * 送信を押した直後に、サーバーの応答を待たずに手元で出している仮のもの (D-071)。id はサーバーのものではない。
+     * 保存しない (スナップショットにも入れない)
+     */
+    @kotlinx.serialization.Transient val pending: Boolean = false,
 )
 
 @Immutable

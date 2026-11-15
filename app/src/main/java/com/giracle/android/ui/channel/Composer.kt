@@ -374,12 +374,19 @@ fun Composer(
         val sessionStore = graph.store
         // 送信待ちに入れるときのユーザー。押した時点で読む (失敗の後だと、ログアウトで消えていることがある、#74)
         val sessionUser = sessionStore.me.value?.id ?: graph.prefs.userId
+        // 応答を待たずに、送ったものを一覧に出す (送信中の印つき、D-071)。添付があるときは出さない (応答の後に今までどおり出る)
+        val localId = if (ids.isEmpty()) store.addPending(channelId, body, reply) else null
+        if (localId != null) {
+            com.giracle.android.data.SendTrace.mark("local_shown", "id=$localId")
+            latestOnSent(localId)
+        }
         graph.scope.launch(Dispatchers.Main.immediate) {
             try {
-                val sent = store.send(channelId, body, ids, reply)
+                val sent = store.send(channelId, body, ids, reply, localId)
                 com.giracle.android.data.SendTrace.mark("http_done", "id=${sent.id}")
                 if (graph.store !== sessionStore) return@launch
-                latestOnSent(sent.id)
+                // 仮のものを出したときは、押した時点で送ったものへ動かしてある
+                if (localId == null) latestOnSent(sent.id)
                 // 共有シート・ランチャーに、このチャンネルを直接の送り先として出す (#25)
                 com.giracle.android.ui.ChannelShortcuts.reportSent(appCtx, channelId, store.channels.value.firstOrNull { it.id == channelId }?.name)
                 // 送信中に次の文を打ち始めていたら、それは下書きとして残す (#79)

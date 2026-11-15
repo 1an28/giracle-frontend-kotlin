@@ -275,7 +275,8 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
     // 一覧に載るのを待ってから動かす。載る前に動かすと、LazyColumn が今の先頭の行 (キー) に位置を合わせ直し、送ったものが画面の外に残る
     var sentId by remember(channelId) { mutableStateOf<String?>(null) }
     LaunchedEffect(sentId, history.version) {
-        val id = sentId ?: return@LaunchedEffect
+        // 仮のもの (D-071) が、動かす前に本物へ置き換わっていたら、本物を探す
+        val id = sentId?.let(store::resolveSent) ?: return@LaunchedEffect
         val i = history.messages.indexOfFirst { it.id == id }
         if (i < 0) return@LaunchedEffect
         sentId = null

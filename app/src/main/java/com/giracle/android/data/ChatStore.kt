@@ -155,15 +155,32 @@ class ChatStore(
      * 先に結果を入れてから控えを外す。逆の順だと、外してから入れるまでの間に届いた新着が、古い一覧に足されて結果で上書きされる (#84 のレビュー)
      */
     private fun applyFetched(channelId: String, flow: MutableStateFlow<HistoryState>, state: HistoryState) {
-        flow.value = state
+        // 送信中の仮のもの (D-071) は、最新側まで取れた結果なら先頭に残す。応答が来たら本物に置き換わる
+        // ただし、結果に本物がもう入っていたら (つなぎ直しの取り直しで、応答より先にサーバーの保存が見えた) 外す。
+        // 外さないと、応答が返るまで二重に見える (#118 のレビュー)。突き合わせるのは前の一覧に無かったものだけ
+        // (前からある昔の同じ本文、例えば「ok」と取り違えないため)
+        flow.update { old ->
+            val pend = if (state.atEnd) old.messages.filter { it.pending } else emptyList()
+            if (pend.isEmpty()) state else {
+                val oldIds = old.messages.mapTo(HashSet()) { it.id }
+                val left = withoutConfirmed(pend, state.messages.filter { it.id !in oldIds })
+                if (left.isEmpty()) state else state.copy(messages = left + state.messages)
+            }
+        }
         if (state.atEnd) {
             flow.update { s ->
                 // 控えは更新の中で読む (間に削除の知らせが来たら、やり直しで最新の控えを読む)
                 val arrived = arrivedWhileFetching[channelId]?.let { synchronized(it) { it.toList() } }.orEmpty()
                 val ids = s.messages.mapTo(HashSet()) { it.id }
                 val extra = arrived.filter { it.id !in ids }.distinctBy { it.id }
-                // 間に一覧へ直接入った新着もあるので、先頭に付けるだけでなく作成時刻で並べる (同じ時刻は今の順を保つ)
-                if (extra.isEmpty()) s else s.copy(messages = (extra + s.messages).sortedByDescending { it.createdAt }, version = s.version + 1)
+                if (extra.isEmpty()) s else {
+                    // 間に一覧へ直接入った新着もあるので、先頭に付けるだけでなく作成時刻で並べる (同じ時刻は今の順を保つ)。
+                    // 仮のものは端末の時計の時刻なので並べる対象にせず、先頭に置いたままにする
+                    val (pend, rest) = s.messages.partition { it.pending }
+                    val sorted = (extra + rest).sortedByDescending { it.createdAt }
+                    // 控えに入った本物が、先頭に残した仮のものと同じ送信なら、仮のものを外す
+                    s.copy(messages = withoutConfirmed(pend, extra) + sorted, version = s.version + 1)
+                }
             }
         }
         arrivedWhileFetching.remove(channelId)
@@ -288,7 +305,9 @@ class ChatStore(
         val u = me.value ?: return null
         val hs = histories.mapNotNull { (id, f) ->
             val v = f.value
-            if (v.loaded && v.atEnd && v.messages.isNotEmpty()) id to v.messages.take(perChannel) else null
+            // 送信中の仮のもの (D-071) は保存しない (次の起動でサーバーに無いものが残るため)
+            val msgs = v.messages.filterNot { it.pending }
+            if (v.loaded && v.atEnd && msgs.isNotEmpty()) id to msgs.take(perChannel) else null
         }.toMap()
         val needUsers = HashSet<String>().apply {
             hs.values.forEach { l -> l.forEach { add(it.userId) } }
@@ -492,10 +511,11 @@ class ChatStore(
         val flow = hist(channelId)
         val s = flow.value
         if (!s.loaded || s.atEnd || s.loadingNewer || s.fromCache) return
-        val newest = s.messages.firstOrNull() ?: return
+        // 送信中の仮のもの (D-071) の id はサーバーに無いので、続きの起点にしない
+        val newest = s.messages.firstOrNull { !it.pending } ?: return
         flow.update { it.copy(loadingNewer = true) }
         lock(channelId).withLock {
-            if (flow.value.fromCache || flow.value.messages.firstOrNull()?.id != newest.id) {
+            if (flow.value.fromCache || flow.value.messages.firstOrNull { !it.pending }?.id != newest.id) {
                 flow.update { it.copy(loadingNewer = false) }
                 return
             }
@@ -555,7 +575,8 @@ class ChatStore(
         val s = hist(channelId).value
         // キャッシュ (切れていた間の投稿が抜けているかもしれない) の最新で既読にすると、見ていない投稿まで既読になる。取り直してから既読にする
         if (!s.atEnd || s.fromCache) return
-        val newest = s.messages.firstOrNull()?.createdAt ?: return
+        // 送信中の仮のもの (D-071) の時刻は端末の時計なので、既読の時刻にしない
+        val newest = s.messages.firstOrNull { !it.pending }?.createdAt ?: return
         val current = readTimes.value[channelId]
         if (current != null && !isAfter(newest, current)) {
             if (hasNew.value[channelId] == true) hasNew.update { it - channelId }
@@ -613,13 +634,74 @@ class ChatStore(
     // 操作
     // ------------------------------------------------------------------
 
-    /** 送ったメッセージを返す (画面が、送ったものを見える位置へ送るため。#58) */
-    suspend fun send(channelId: String, text: String, fileIds: List<String>, replyTo: String?): Message {
-        val msg = api.send(channelId, text, fileIds, replyTo)
+    /**
+     * 送信を押した直後に、応答を待たずに仮のメッセージを一覧の先頭に出す (D-071)。出した仮のものの id を返す。
+     * 最新側を出していない・キャッシュを出しているときは出さず null (応答の後に今までどおり足す。[addMessage] と同じ条件)。
+     * 仮のものは、応答か WebSocket で本物が届いたら置き換わり、送信に失敗したら消える ([send])
+     */
+    fun addPending(channelId: String, text: String, replyTo: String?): String? {
+        val myId = me.value?.id ?: return null
+        val flow = histories[channelId] ?: return null
+        val local = Message(
+            id = "local-" + java.util.UUID.randomUUID(), channelId = channelId, userId = myId, content = text,
+            replyingMessageId = replyTo, createdAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS).toString(), pending = true,
+        )
+        var added = false
+        flow.update { s ->
+            added = s.loaded && s.atEnd && !s.fromCache
+            if (added) s.copy(messages = listOf(local) + s.messages, version = s.version + 1) else s
+        }
+        return if (added) local.id else null
+    }
+
+    /**
+     * 送ったメッセージを返す (画面が、送ったものを見える位置へ送るため。#58)。
+     * [localId] は [addPending] で出した仮のもの。届いたら本物に置き換え、失敗 (取り消しを含む) したら消す
+     */
+    suspend fun send(channelId: String, text: String, fileIds: List<String>, replyTo: String?, localId: String? = null): Message {
+        val msg = try {
+            api.send(channelId, text, fileIds, replyTo)
+        } catch (e: Throwable) {
+            if (localId != null) removePending(channelId, localId)
+            throw e
+        }
         SendTrace.mark("main_resumed") // 応答の解析の後、呼んだ側 (画面ならメインスレッド) に戻った時点 (#70)
-        // WS より先に応答が来た場合でも即座に表示する (重複は addMessage で除く)
-        addMessage(msg)
+        // WS より先に応答が来た場合でも即座に表示する (重複は除く)
+        confirmSent(msg, localId)
         return msg
+    }
+
+    /** 本物に置き換わった仮のものの id → 本物の id。画面が、送ったものへ動かす前に置き換わったときに使う ([resolveSent]) */
+    private val confirmedIds = ConcurrentHashMap<String, String>()
+
+    /** 仮のものの id なら、置き換わった本物の id を返す (まだなら・仮のものでなければそのまま) */
+    fun resolveSent(id: String): String = confirmedIds[id] ?: id
+
+    private fun removePending(channelId: String, localId: String) {
+        histories[channelId]?.update { s ->
+            if (s.messages.none { it.id == localId }) s
+            else s.copy(messages = s.messages.filterNot { it.id == localId }, version = s.version + 1)
+        }
+    }
+
+    /** 送信の応答で届いた本物を一覧に入れる。仮のもの [localId] が残っていれば置き換える */
+    private fun confirmSent(m: Message, localId: String?) {
+        arrivedWhileFetching[m.channelId]?.add(m)
+        val flow = histories[m.channelId] ?: return
+        flow.update { s ->
+            val hasReal = s.messages.any { it.id == m.id }
+            val i = if (localId == null) -1 else s.messages.indexOfFirst { it.id == localId }
+            when {
+                // WebSocket で先に届いて、別の仮のものと置き換わっていた (同じ本文の仮のものは、古い方から置き換わる)
+                i >= 0 && hasReal -> s.copy(messages = s.messages.filterIndexed { j, _ -> j != i }, version = s.version + 1)
+                    .also { confirmedIds[localId!!] = m.id }
+                i >= 0 -> s.copy(messages = insertConfirmed(s.messages.filterIndexed { j, _ -> j != i }, m), version = s.version + 1)
+                    .also { confirmedIds[localId!!] = m.id }
+                hasReal -> s
+                !s.loaded || !s.atEnd || s.fromCache -> s
+                else -> s.copy(messages = insertConfirmed(s.messages, m), version = s.version + 1)
+            }
+        }
     }
 
     suspend fun toggleReaction(message: Message, emojiCode: String) {
@@ -811,11 +893,52 @@ class ChatStore(
         // 取り直しの最中なら控えておく。結果に入っていなければ、取り直しの終わりに足す (#84)
         arrivedWhileFetching[m.channelId]?.add(m)
         val flow = histories[m.channelId] ?: return
+        val myId = me.value?.id
         flow.update { s ->
+            val hasReal = s.messages.any { it.id == m.id }
+            // 自分の送信が WebSocket で応答より先に届いたら、手元に出している仮のもの (D-071) と置き換える。
+            // サーバーに重複を防ぐ ID が無い (S-8) ので、同じ本文・同じ返信先で、いちばん古い仮のものと突き合わせる。
+            // 本物がもう一覧にあっても (取り直しの結果で入った)、仮のものが残っていれば外す
+            if (m.userId == myId) {
+                val i = s.messages.indexOfLast { it.pending && sameSend(it, m) }
+                if (i >= 0) {
+                    confirmedIds[s.messages[i].id] = m.id
+                    val rest = s.messages.filterIndexed { j, _ -> j != i }
+                    return@update s.copy(messages = if (hasReal) rest else insertConfirmed(rest, m), version = s.version + 1)
+                }
+            }
+            if (hasReal) return@update s
             // キャッシュには足さない (切れていた間の投稿が抜けたまま、新着だけが続いて見えるため。開いたときに取り直す)
-            if (!s.loaded || !s.atEnd || s.fromCache || s.messages.any { it.id == m.id }) s
-            else s.copy(messages = listOf(m) + s.messages, version = s.version + 1)
+            if (!s.loaded || !s.atEnd || s.fromCache) s
+            else s.copy(messages = insertConfirmed(s.messages, m), version = s.version + 1)
         }
+    }
+
+    /** 仮のもの [pending] と、届いた本物 [real] が同じ送信か (本文と返信先で見る。S-8 が無いため) */
+    private fun sameSend(pending: Message, real: Message) =
+        pending.channelId == real.channelId && pending.content == real.content && pending.replyingMessageId == real.replyingMessageId
+
+    /** [pend] (仮のもの) から、[confirmed] の本物と同じ送信のものを、本物 1 件につき古い方から 1 件ずつ外す */
+    private fun withoutConfirmed(pend: List<Message>, confirmed: List<Message>): List<Message> {
+        if (pend.isEmpty()) return pend
+        val myId = me.value?.id
+        val left = pend.toMutableList()
+        for (r in confirmed) {
+            if (r.userId != myId) continue
+            val i = left.indexOfLast { sameSend(it, r) }
+            if (i >= 0) confirmedIds[left.removeAt(i).id] = r.id
+        }
+        return left
+    }
+
+    /**
+     * 新しい順の一覧 [list] に、届いたもの [m] を入れる。先頭の仮のもの (送信中) より後ろで、[m] より新しいものの後ろに置く。
+     * ふつうは仮のものの直後 (仮のものが無ければ先頭) になる
+     */
+    private fun insertConfirmed(list: List<Message>, m: Message): List<Message> {
+        var i = 0
+        while (i < list.size && (list[i].pending || isAfter(list[i].createdAt, m.createdAt))) i++
+        return ArrayList<Message>(list.size + 1).apply { addAll(list.subList(0, i)); add(m); addAll(list.subList(i, list.size)) }
     }
 
     private fun updateMessage(channelId: String, id: String, f: (Message) -> Message) {
