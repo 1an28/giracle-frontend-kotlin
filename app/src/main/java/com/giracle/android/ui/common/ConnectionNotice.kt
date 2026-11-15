@@ -19,12 +19,13 @@ import kotlinx.coroutines.launch
  * 切れてすぐには出さず ([CONNECTION_NOTICE_GRACE_MS] 続いたら出す)、出した後につながったら「つながりました」を少し出して消す
  */
 @Immutable
-enum class ConnectionNotice(val label: String?) {
+enum class ConnectionNotice(val label: String?, val shortLabel: String? = label) {
     None(null),
     Connecting("接続中… 新着はつながってから届きます"),
     Offline("オフライン — 再接続を待っています"),
     Reconnected("つながりました"),
-    AuthError("リアルタイム接続が拒否されました (サーバーの CORS_ORIGIN 設定を確認)"),
+    /** チャンネルの題名の下は 1 行なので短くする。直し方はホームの行に任せる */
+    AuthError("リアルタイム接続が拒否されました (サーバーの CORS_ORIGIN 設定を確認)", "リアルタイム接続が拒否されました"),
 }
 
 /** 切れてから見せるまでの時間。つなぎ直しは普段 1〜2 秒で済む (WsClient の最初の待ち時間は 1〜1.5 秒) ので、その間はちらつかせない */

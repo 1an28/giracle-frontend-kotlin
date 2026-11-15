@@ -630,6 +630,7 @@ class ReleaseAppTest {
         var errorMs = -1L
         var hiddenMs = -1L
         var bannerMs = -1L
+        var noticeWithBannerMs = -1L
         shell("cmd connectivity airplane-mode enable")
         try {
             SystemClock.sleep(3_000)
@@ -643,6 +644,8 @@ class ReleaseAppTest {
                 if (!visible && shownMs >= 0 && hiddenMs < 0) hiddenMs = now
                 if (errorMs < 0 && device.findObject(By.text(LOAD_ERROR_TEXT)) != null) errorMs = now
                 if (bannerMs < 0 && device.findObject(res("app.offline_banner")) != null) bannerMs = now
+                // 帯が出ている間は、チャンネルの題名の下に接続の知らせを重ねない (D-073)
+                if (noticeWithBannerMs < 0 && device.findObject(res("app.offline_banner")) != null && device.findObject(res("app.connection_notice")) != null) noticeWithBannerMs = now
                 SystemClock.sleep(300)
             }
             shot("offline_start")
@@ -668,7 +671,7 @@ class ReleaseAppTest {
         val errorStill = device.findObject(By.text(LOAD_ERROR_TEXT)) != null
         Log.i(
             TAG,
-            "E2E-RESULT offline_start shown_ms=$shownMs hidden_ms=$hiddenMs error_ms=$errorMs banner_ms=$bannerMs still_shown_15s=$stillShown " +
+            "E2E-RESULT offline_start shown_ms=$shownMs hidden_ms=$hiddenMs error_ms=$errorMs banner_ms=$bannerMs notice_with_banner_ms=$noticeWithBannerMs still_shown_15s=$stillShown " +
                 "updated_after_net_ms=$updatedMs error_after_net=$errorStill outbox_shown=$outboxShown delivered=$deliveredCount sdk=${android.os.Build.VERSION.SDK_INT}",
         )
         assertAlive("電波が無いときに起動した後")
@@ -676,6 +679,7 @@ class ReleaseAppTest {
         assertTrue("電波が無いときに起動して、前回の内容が出ない (shown_ms=$shownMs)", shownMs >= 0)
         assertTrue("電波が無いときに起動して、前回の内容が隠れた (hidden_ms=$hiddenMs error_ms=$errorMs)", stillShown && hiddenMs < 0 && errorMs < 0)
         assertTrue("電波が無いときに、オフラインの帯 (app.offline_banner) が出ない", bannerMs >= 0)
+        assertTrue("起動時の帯と接続の知らせが重なって出た (notice_with_banner_ms=$noticeWithBannerMs)", noticeWithBannerMs < 0)
         assertTrue("電波が戻っても、操作なしでは圏外の間の送信が出ない", updated)
         assertTrue("圏外で起動して送ったものが、送信待ちにならない", outboxShown)
         assertTrue("圏外で起動して送ったものが $deliveredCount 件届いた (1 件のはず。delivered=$delivered)", deliveredCount == 1)

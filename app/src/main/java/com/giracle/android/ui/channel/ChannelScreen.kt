@@ -350,7 +350,7 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
                         }
                         // 接続が切れている間は、題名の下の行 (説明) を接続の知らせに差し替える (Telegram と同じ形。一覧の場所を取らない、P-5。D-073)。
                         // 読み込みに失敗した帯 (D-057) が出ている間は、そちらが知らせるので重ねない
-                        val notice = connection.label?.takeIf { !loadFailedBanner }
+                        val notice = connection.shortLabel?.takeIf { !loadFailedBanner }
                         if (notice != null) {
                             Text(
                                 notice, Modifier.testTag(TestTags.CONNECTION_NOTICE), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
