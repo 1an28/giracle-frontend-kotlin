@@ -143,7 +143,7 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
         graph.prefs.lastChannelId = channelId
         // 開いたチャンネルの通知は、もう要らないので消す
         com.giracle.android.notify.Notifier.cancelChannel(ctx, channelId)
-        if (channel == null) runCatching { store.channels.value = store.channels.value + graph.api.channelInfo(channelId) }
+        if (channel == null) runCatching { store.fetchChannelInfo(channelId) }
         try {
             store.openChannel(channelId)
         } catch (e: Exception) {
