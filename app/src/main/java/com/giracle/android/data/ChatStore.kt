@@ -731,10 +731,8 @@ class ChatStore(
      * そのチャンネルだけの一覧で上書きしてしまう。ホームの参加チャンネルが 1 つしか出なくなっていた
      */
     suspend fun fetchChannelInfo(channelId: String): Channel {
-        // 確かめ用: 直す前の書き方 (取ってくる前に読んだ一覧に足して書き戻す)。テストが落ちることを CI で確かめたら戻す
-        val before = channels.value
         val info = api.channelInfo(channelId)
-        channels.value = if (before.any { it.id == info.id }) before.map { if (it.id == info.id) info else it } else before + info
+        channels.update { l -> if (l.any { it.id == info.id }) l.map { if (it.id == info.id) info else it } else l + info }
         return info
     }
 
