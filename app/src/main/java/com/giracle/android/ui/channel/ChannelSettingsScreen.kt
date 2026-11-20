@@ -70,7 +70,7 @@ fun ChannelSettingsScreen(channelId: String) {
     var tab by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(channelId) {
         // 閲覧可能ロールは get-info にだけ含まれるので取り直す
-        runCatching { graph.api.channelInfo(channelId) }.onSuccess { info -> store.channels.value = store.channels.value.map { if (it.id == info.id) info else it } }
+        runCatching { store.fetchChannelInfo(channelId) }
     }
     fun act(f: suspend () -> Unit) = scope.launch { runCatching { f() }.onSuccess { ctx.toast("更新しました") }.onFailure { ctx.toast(it.userMessage()) } }
 

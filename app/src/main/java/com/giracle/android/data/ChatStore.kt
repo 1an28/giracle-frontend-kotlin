@@ -725,6 +725,17 @@ class ChatStore(
         mutedChannels.update { if (muted) it + channelId else it - channelId }
     }
 
+    /**
+     * 1 つのチャンネルの情報を取り直して、一覧に入れる (無ければ足し、あれば置き換える)。
+     * 取ってくる前に読んだ一覧に足して書き戻すと、待つ間に届いた全件 (起動時の読み込み) を、
+     * そのチャンネルだけの一覧で上書きしてしまう。ホームの参加チャンネルが 1 つしか出なくなっていた
+     */
+    suspend fun fetchChannelInfo(channelId: String): Channel {
+        val info = api.channelInfo(channelId)
+        channels.update { l -> if (l.any { it.id == info.id }) l.map { if (it.id == info.id) info else it } else l + info }
+        return info
+    }
+
     suspend fun refreshChannels() {
         channels.value = api.channelList()
         me.value?.id?.let { me.value = api.userInfo(it).also(::putUser) }
