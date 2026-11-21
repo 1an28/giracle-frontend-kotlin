@@ -4,6 +4,8 @@
 #   APP_APK : 確かめる APK (既定: assembleRelease の出力)
 #   LAN_SERVER : 端末から LAN のアドレスで見たサーバー (既定 http://10.0.2.2:3333 = エミュレータから見たランナー)。
 #                電波を切る確認 (#37) とローカルネットワーク権限の確認 (#42) に使う。空にすると飛ばす
+#   PREV_APK : 上書き更新の確認 (D-075 の 3、D-080) の元にする前の版の APK (APP_APK と同じ鍵で署名したもの)。
+#              空なら飛ばす。指定したのにファイルが無ければ (前の版を作れなかった) 失敗にする
 # 結果は e2e-out/ (画面・logcat・crash バッファ) に置く。
 set -uo pipefail
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
@@ -11,6 +13,7 @@ ADB="$SDK/platform-tools/adb"
 AAPT2=$(ls -d "$SDK"/build-tools/*/aapt2 | sort -V | tail -1)
 APP_APK=${APP_APK:-app/build/outputs/apk/release/app-release.apk}
 LAN_SERVER=${LAN_SERVER-http://10.0.2.2:3333}
+PREV_APK=${PREV_APK:-}
 TEST_APK=$(ls e2e/build/outputs/apk/debug/*.apk | head -1)
 APP_PKG=$("$AAPT2" dump packagename "$APP_APK")
 TEST_PKG=$("$AAPT2" dump packagename "$TEST_APK")
@@ -21,8 +24,6 @@ echo "app: $APP_PKG ($APP_APK)  test: $TEST_PKG ($TEST_APK)"
 set -e
 # 端末の localhost:3333 をランナーのサーバーにつなぐ (アプリが送る Origin が CORS_ORIGIN と一致する)
 "$ADB" reverse tcp:3333 tcp:3333
-# 権限は付けずに入れる (通知の権限の確認画面が出ることも確かめるため)
-"$ADB" install -r "$APP_APK"
 "$ADB" install -r -t "$TEST_APK"
 "$ADB" shell pm list instrumentation
 # 送信を押した直後のスタックと描画の間隔を記録させる (SendTrace.profileAfterTap、#70、D-068)。利用者の端末では付かない
@@ -57,6 +58,40 @@ logcat_stop() { # $1: ファイル $2: 実行の名前
 
 # 実行ごとに追記するので、前の実行 (手元で 2 回目を動かしたとき) の行を残さないよう空にしておく
 : > "$OUT/logcat.txt"
+
+app_version() { "$ADB" shell dumpsys package "$APP_PKG" | grep -m 2 -oE "version(Code|Name)=[^ ]+" | tr '\n' ' '; }
+# 上書き更新で失わない (D-075 の 3、D-080)。前の版でログイン・設定・下書き・送信待ち (圏外) を作り、今の版を adb install -r で上書きして確かめる。
+# 送信待ちを作るのに電波を切るので、LAN のアドレスのサーバーを使う
+UPGRADE_RUN=0
+if [ -n "$PREV_APK" ] && [ -n "$LAN_SERVER" ]; then
+  if [ ! -f "$PREV_APK" ]; then
+    echo "::error::前の版の APK ($PREV_APK) が無い。上の「Build previous release APK」が失敗した"
+  else
+    UPGRADE_RUN=1
+    PREV_TAG=$(cat "$(dirname "$PREV_APK")/tag" 2>/dev/null || echo "?")
+    "$ADB" uninstall "$APP_PKG" > /dev/null 2>&1
+    # 権限は付けずに入れる (通知の権限の確認画面が出ることも確かめるため)
+    "$ADB" install "$PREV_APK"
+    echo "上書き更新の確認: 前の版 $PREV_TAG ($(app_version))"
+    logcat_start "$OUT/logcat.txt" upgrade
+    "$ADB" shell am instrument -w -e appPackage "$APP_PKG" -e server http://localhost:3333 -e lanServer "$LAN_SERVER" \
+      -e upgradePhase before -e prevVersion "$PREV_TAG" -e class com.giracle.e2e.ReleaseAppTest#upgradeBefore \
+      "$TEST_PKG/androidx.test.runner.AndroidJUnitRunner" 2>&1 | tee "$OUT/instrument-upgrade-before.txt"
+    if grep -q '^OK (' "$OUT/instrument-upgrade-before.txt"; then
+      "$ADB" install -r "$APP_APK"
+      echo "上書き更新の確認: 上書きした後 ($(app_version))"
+      "$ADB" shell am instrument -w -e appPackage "$APP_PKG" -e server http://localhost:3333 -e lanServer "$LAN_SERVER" \
+        -e upgradePhase after -e prevVersion "$PREV_TAG" -e class com.giracle.e2e.ReleaseAppTest#upgradeAfter \
+        "$TEST_PKG/androidx.test.runner.AndroidJUnitRunner" 2>&1 | tee "$OUT/instrument-upgrade-after.txt"
+    fi
+    # 途中で失敗しても、後の確認を巻き添えにしないよう電波を戻す
+    "$ADB" shell cmd connectivity airplane-mode disable
+    logcat_stop "$OUT/logcat.txt" upgrade
+  fi
+fi
+# 権限は付けずに入れる (通知の権限の確認画面が出ることも確かめるため)。上書き更新の確認の後なら、上書きしても変わらない
+"$ADB" install -r "$APP_APK" || { echo "::error::確かめる APK を入れられない"; exit 1; }
+
 logcat_start "$OUT/logcat.txt" fast
 t0=$(date +%s)
 LAN_ARGS=()
@@ -110,7 +145,7 @@ show_clues() {
   # 送信待ち・接続・再同期の記録 (#101)。上の 2 つは最後の行だけなので、前半のテストの記録が押し出される。タグで絞って全部出す
   # 送信の経路 (GiracleSend、#94) も、どこまで進んだかを追えるよう同じところに出す
   echo "::group::送信・送信待ち・接続・再同期 (GiracleSend・Outbox・GiracleWs・GiracleSync・GiracleNav)"
-  grep -E " (GiracleSend|Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan|send)" "$OUT/logcat.txt" | tail -n 400
+  grep -E " (GiracleSend|Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan|send|upgrade)" "$OUT/logcat.txt" | tail -n 400
   echo "::endgroup::"
   echo "::group::プッシュ通知の受信 (UnifiedPush・Play 開発者サービス)"
   # Couldn't register / Missing registration id: 組み込みの配信が Play 開発者サービスから受けた失敗の理由 (タグは R8 で短くなる。#93)
@@ -127,6 +162,15 @@ show_clues() {
 # am instrument は失敗しても終了コードが 0 なので、出力で判断する
 grep -q '^OK (' "$OUT/instrument.txt" || { echo "::error::配布版の確認 (e2e) が失敗した。成果物 e2e の instrument.txt と画面を見る"; status=1; }
 [ $SLOW_OK = 1 ] || status=1
+if [ -n "$PREV_APK" ] && [ -n "$LAN_SERVER" ]; then
+  if [ $UPGRADE_RUN = 0 ]; then
+    status=1
+  elif ! grep -q "E2E-RESULT upgrade_test=done" "$OUT/logcat.txt"; then
+    echo "::error::上書き更新の確認 (upgradeBefore / upgradeAfter、D-080) が通らなかった。instrument-upgrade-*.txt を見る"
+    tail -n 40 "$OUT/instrument-upgrade-before.txt" "$OUT/instrument-upgrade-after.txt" 2>/dev/null
+    status=1
+  fi
+fi
 if ! grep -q '^OK (' "$OUT/instrument-slow.txt"; then
   echo "::error::遅い回線でのよく使う作業の測定 (uxTasks) が失敗した。instrument-slow.txt を見る"
   tail -n 40 "$OUT/instrument-slow.txt"
@@ -182,6 +226,10 @@ fi
 if grep -q "E2E-RESULT send_tap_retry" "$OUT/logcat.txt"; then
   echo "::warning::送信ボタンを押しても受け付けられず、押し直した (#94)。$(grep -oE 'E2E-RESULT send_tap_retry .*' "$OUT/logcat.txt" | head -1)"
 fi
+# 上書き更新で失わない (D-080)。通ったときも、何が残ったかを出す
+echo "::group::上書き更新 (upgrade)"
+grep -oE "E2E-RESULT upgrade.*" "$OUT/logcat.txt" | sed "s/E2E-RESULT //"
+echo "::endgroup::"
 # 電波が無いときの起動 (#82、P-2)。前回の内容が見え続けるか・電波が戻ったら操作なしで最新になるか
 echo "::group::電波が無いときの起動 (offline_start)"
 grep -oE "E2E-RESULT offline_start .*" "$OUT/logcat.txt" | sed "s/E2E-RESULT //"
