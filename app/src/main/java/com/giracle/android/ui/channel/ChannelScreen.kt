@@ -653,7 +653,7 @@ fun ImageViewer(f: FileAttached, url: String, onDismiss: () -> Unit, onSave: () 
                 painter, f.actualFileName, contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
             )
-            // 失敗したら一覧と同じ印を出す。背景を押すと閉じるので、出し直しは印を押したときだけ (#129、D-074)
+            // 失敗したら一覧と同じ印を出す。背景を押すと閉じるので、出し直しは印を押したときだけ (#129、D-076)
             ImageFailureMark(failure, Modifier.align(Alignment.Center), onDark = true, onRetry = { painter.restart() })
             Row(
                 Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),

@@ -68,11 +68,9 @@ class UiScreenshotTest {
     private val createdChannels = mutableListOf<String>()
 
     /** 画面の外 (テストの準備・後片付け) からサーバーを操作する、アプリとは別の管理者セッション */
-    private val fixtureHttp by lazy {
-        buildOkHttp(Prefs(ApplicationProvider.getApplicationContext(), "ui-fixture").apply { clearSession() }, null)
-    }
     private val fixture: GiracleApi by lazy {
-        GiracleApi(fixtureHttp, Endpoint.parse(server!!)!!).also { api ->
+        val prefs = Prefs(ApplicationProvider.getApplicationContext(), "ui-fixture").apply { clearSession() }
+        GiracleApi(buildOkHttp(prefs, null), Endpoint.parse(server!!)!!).also { api ->
             runBlocking { api.signIn(adminUser, adminPass) }
         }
     }
@@ -250,7 +248,7 @@ class UiScreenshotTest {
 
     /**
      * 管理者が古い添付を消した後に、端末に残った一覧から画像を開くと、全画面表示に「ファイルがサーバーにありません」を出す
-     * (サーバーは 404 を返す。出し直しの印は出さない。#129、D-074)
+     * (サーバーは 404 を返す。出し直しの印は出さない。#129、D-076)
      */
     @Test fun imageGoneFromServer() {
         assumeTrue(server != null)
@@ -264,11 +262,7 @@ class UiScreenshotTest {
         val img = SemanticsMatcher("画像") { n -> n.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("channel.image") == true }
         waitFor(img)
         // 今より古い添付をサーバーからすべて消す (管理者の操作。このテストのチャンネルの画像も消える)
-        val api = ApplicationProvider.getApplicationContext<GiracleApp>().graph.api
-        val body = """{"deleteOlderThan":"${java.time.Instant.now().plusSeconds(1)}"}""".toRequestBody("application/json".toMediaType())
-        fixtureHttp.newCall(okhttp3.Request.Builder().url(api.endpoint.apiUrl("server/delete-old-files")).delete(body).build()).execute().use {
-            assertTrue("添付の削除: ${it.code}", it.isSuccessful)
-        }
+        runBlocking { fixture.deleteOldFiles(java.time.Instant.now().plusSeconds(1)) }
         // 端末の画像の保存 (Coil と OkHttp の両方) も消して、全画面表示でサーバーに取りに行かせる
         coil3.SingletonImageLoader.get(ApplicationProvider.getApplicationContext()).let { it.memoryCache?.clear(); it.diskCache?.clear() }
         ApplicationProvider.getApplicationContext<GiracleApp>().graph.http.cache?.evictAll()

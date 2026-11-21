@@ -33,7 +33,7 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 添付画像の読み込みに失敗したとき (#129、D-074): 印が出ること、押す・接続が戻ると出し直すこと、
+ * 添付画像の読み込みに失敗したとき (#129、D-076): 印が出ること、押す・接続が戻ると出し直すこと、
  * サーバーに無い (404) なら出し直さないことを、読み込み役を差し替えて確かめる (サーバーは要らない)
  */
 @RunWith(RobolectricTestRunner::class)
