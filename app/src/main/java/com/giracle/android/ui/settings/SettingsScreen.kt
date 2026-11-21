@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import com.giracle.android.ui.common.TestTags
 import com.giracle.android.notify.PushRegistrar
+import com.giracle.android.notify.PushRegistrationRetry
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -386,6 +387,7 @@ private fun PushSection() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val endpoint by graph.prefs.pushEndpointFlow.collectAsStateWithLifecycle()
+    val retry by graph.pushRetry.state.collectAsStateWithLifecycle()
     var message by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     Text("プッシュ通知", style = MaterialTheme.typography.titleSmall)
@@ -395,12 +397,14 @@ private fun PushSection() {
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Text(
-        message ?: PushRegistrar.status(ctx, endpoint),
+        message ?: PushRegistrar.status(ctx, endpoint, retry),
         style = MaterialTheme.typography.bodyMedium,
         modifier = Modifier.testTag(TestTags.SETTINGS_PUSH_STATUS),
     )
     // 登録が済んだら (宛先が変わったら) 一時的な案内を消して、今の状態を出す
     LaunchedEffect(endpoint) { if (endpoint != null) message = null }
+    // やり直しの状態が変わったら (失敗した・やり直している)、そちらを出す。「登録しています」のまま残さない (#93)
+    LaunchedEffect(retry) { if (retry !is PushRegistrationRetry.State.Idle) message = null }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(enabled = !busy, modifier = Modifier.testTag(TestTags.SETTINGS_PUSH_ENABLE), onClick = {
             busy = true
@@ -409,7 +413,7 @@ private fun PushSection() {
                 if (activity == null) { busy = false; return@launch }
                 PushRegistrar.enable(activity, graph) { r ->
                     message = when (r) {
-                        PushRegistrar.Result.Requested -> "登録しています。数秒で有効になります"
+                        PushRegistrar.Result.Requested -> null // 状態 (やり直しを含む) から出す
                         PushRegistrar.Result.NoDistributor -> "使える配信先がありません。Google Play 開発者サービスの無い端末では、" +
                             "ntfy などの UnifiedPush 配信アプリを入れてから、もう一度押してください"
                         PushRegistrar.Result.ServerNotConfigured -> "このサーバーはプッシュ通知 (VAPID 鍵) が設定されていません。管理者に設定を依頼してください"

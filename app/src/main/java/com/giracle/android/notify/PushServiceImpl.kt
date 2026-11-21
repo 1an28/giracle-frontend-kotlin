@@ -6,11 +6,13 @@ import com.giracle.android.GiracleApp
 import com.giracle.android.data.InAppNotice
 import com.giracle.android.data.model.PushPayload
 import com.giracle.android.data.net.AppJson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.PushService
+import org.unifiedpush.android.connector.UnifiedPush
 import org.unifiedpush.android.connector.data.PushEndpoint
 import org.unifiedpush.android.connector.data.PushMessage
 
@@ -27,17 +29,32 @@ class PushServiceImpl : PushService() {
 
     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
         Log.i(TAG, "new endpoint: ${endpoint.url.substringBefore("/fcm/send/").take(60)}")
-        val keys = endpoint.pubKeySet ?: run {
-            Log.w(TAG, "endpoint without keys")
+        val g = graph
+        // 登録を頼んでいる間に、無効にした・ログアウトしたなら、遅れて届いた宛先は使わずに解く (D-076)
+        if (g.prefs.pushOptOut || g.prefs.userId == null) {
+            Log.i(TAG, "endpoint after opt-out or sign-out: unregister")
+            g.pushRetry.reset()
+            g.scope.launch(Dispatchers.IO) { runCatching { UnifiedPush.unregister(applicationContext) } }
             return
         }
-        val g = graph
+        val keys = endpoint.pubKeySet ?: run {
+            Log.w(TAG, "endpoint without keys")
+            g.pushRetry.serverFailed()
+            return
+        }
         g.scope.launch {
             runCatching {
                 g.prefs.pushEndpoint?.takeIf { it != endpoint.url }?.let { old -> g.api.deviceUnregister(old) }
                 g.api.deviceRegister(endpoint.url, keys.pubKey, keys.auth, "Android ${Build.MODEL} (Giracle Native)")
                 g.prefs.pushEndpoint = endpoint.url
-            }.onFailure { Log.w(TAG, "register failed", it) }
+            }.onSuccess {
+                // 宛先を保存してから状態を戻す (先に戻すと、サーバーへの登録の間「無効」と出る)
+                g.pushRetry.succeeded()
+            }.onFailure {
+                Log.w(TAG, "register failed", it)
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                g.pushRetry.serverFailed()
+            }
         }
     }
 
@@ -84,6 +101,10 @@ class PushServiceImpl : PushService() {
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {
         Log.w(TAG, "registration failed: $reason")
+        // 一時的な失敗なら、間をおいてやり直す (#93、D-076)
+        val retry = graph.pushRetry
+        retry.failed(reason)
+        Log.i(TAG, "retry state: ${retry.state.value}")
     }
 
     override fun onUnregistered(instance: String) {

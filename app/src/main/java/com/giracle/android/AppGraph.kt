@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import okhttp3.OkHttpClient
@@ -55,6 +56,11 @@ class AppGraph(context: Context) {
 
     val api = GiracleApi(http, endpoint)
     val ws = WsClient(http, scope) { endpoint }
+
+    /** プッシュ通知の登録が一時的に失敗したときのやり直し (#93、D-076) */
+    val pushRetry = com.giracle.android.notify.PushRegistrationRetry(scope) { vapid ->
+        withContext(Dispatchers.IO) { org.unifiedpush.android.connector.UnifiedPush.register(appContext, vapid = vapid) }
+    }
 
     /**
      * アプリの画面が前面にあるか (GiracleApp が切り替える)。プッシュで裏から起きたプロセスでは false のまま。
@@ -299,6 +305,7 @@ class AppGraph(context: Context) {
 
     private fun signOutLocal() {
         // セッション切れでも、前のユーザー宛ての通知を受け続けないよう配信先の登録を解く
+        pushRetry.reset()
         if (prefs.pushEndpoint != null) {
             prefs.pushEndpoint = null
             scope.launch(Dispatchers.IO) { runCatching { org.unifiedpush.android.connector.UnifiedPush.unregister(appContext) } }
