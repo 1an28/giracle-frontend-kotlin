@@ -108,8 +108,9 @@ show_clues() {
     echo "::endgroup::"
   fi
   # 送信待ち・接続・再同期の記録 (#101)。上の 2 つは最後の行だけなので、前半のテストの記録が押し出される。タグで絞って全部出す
-  echo "::group::送信待ち・接続・再同期 (Outbox・GiracleWs・GiracleSync・GiracleNav)"
-  grep -E " (Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan)" "$OUT/logcat.txt" | tail -n 300
+  # 送信の経路 (GiracleSend、#94) も、どこまで進んだかを追えるよう同じところに出す
+  echo "::group::送信・送信待ち・接続・再同期 (GiracleSend・Outbox・GiracleWs・GiracleSync・GiracleNav)"
+  grep -E " (GiracleSend|Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan|send)" "$OUT/logcat.txt" | tail -n 400
   echo "::endgroup::"
   echo "::group::プッシュ通知の受信 (UnifiedPush・Play 開発者サービス)"
   # Couldn't register / Missing registration id: 組み込みの配信が Play 開発者サービスから受けた失敗の理由 (タグは R8 で短くなる。#93)
@@ -172,6 +173,10 @@ fi
 if [ $status = 0 ] && [ -n "$LAN_SERVER" ] && ! grep -q "E2E-RESULT offline_start_test=done" "$OUT/logcat.txt"; then
   echo "::error::電波が無いときの起動の確認 (offlineColdStart) が最後まで動いていない (飛ばされた?)"
   status=1
+fi
+# 送信がサーバーで見つからなかった回の、その後の行方 (#94)。遅れて届いたか・本文が違うものが届いたか・無いままか
+if grep -q "E2E-RESULT send_server" "$OUT/logcat.txt"; then
+  echo "::warning::送信がサーバーで見つからなかった (#94)。$(grep -oE 'E2E-RESULT send_server .*' "$OUT/logcat.txt" | head -1)"
 fi
 # 送信ボタンを押し直した回 (#94)。通っても見えるように警告にする
 if grep -q "E2E-RESULT send_tap_retry" "$OUT/logcat.txt"; then

@@ -656,15 +656,23 @@ class ChatStore(
 
     /**
      * 送ったメッセージを返す (画面が、送ったものを見える位置へ送るため。#58)。
-     * [localId] は [addPending] で出した仮のもの。届いたら本物に置き換え、失敗 (取り消しを含む) したら消す
+     * [localId] は [addPending] で出した仮のもの。届いたら本物に置き換え、失敗 (取り消しを含む) したら消す。
+     * [trace] は送信の記録 ([SendLog]) の番号。0 なら新しく振る (送信待ちからの送り直し)
      */
-    suspend fun send(channelId: String, text: String, fileIds: List<String>, replyTo: String?, localId: String? = null): Message {
+    suspend fun send(channelId: String, text: String, fileIds: List<String>, replyTo: String?, localId: String? = null, trace: Int = 0): Message {
+        val n = if (trace != 0) trace else SendLog.next().also { SendLog.log(it, "start", "from=outbox") }
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        SendLog.log(n, "request", "pending=${localId != null} files=${fileIds.size}")
         val msg = try {
             api.send(channelId, text, fileIds, replyTo)
         } catch (e: Throwable) {
+            val ms = android.os.SystemClock.elapsedRealtime() - t0
+            if (e is CancellationException) SendLog.log(n, "cancelled", "ms=$ms")
+            else SendLog.log(n, "failure", "ms=$ms type=${e.javaClass.name} code=${(e as? ApiException)?.code} network=${Outbox.isNetworkFailure(e)}")
             if (localId != null) removePending(channelId, localId)
             throw e
         }
+        SendLog.log(n, "response", "ms=${android.os.SystemClock.elapsedRealtime() - t0} ok=true")
         SendTrace.mark("main_resumed") // 応答の解析の後、呼んだ側 (画面ならメインスレッド) に戻った時点 (#70)
         // WS より先に応答が来た場合でも即座に表示する (重複は除く)
         confirmSent(msg, localId)

@@ -87,6 +87,7 @@ import com.giracle.android.ui.common.toast
 import com.giracle.android.ui.common.uploadFileFrom
 import com.giracle.android.data.ImageShrinker
 import com.giracle.android.data.Outbox
+import com.giracle.android.data.SendLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -340,7 +341,11 @@ fun Composer(
     val canSend = !sending && !uploading && !tooLong && (text.isNotBlank() || attachments.any { it.fileId != null })
 
     fun submit() {
-        if (!canSend) return
+        if (!canSend) {
+            // 押したのに送らなかった理由 (#94)。中身は記録しない
+            SendLog.log(0, "ignored", "sending=$sending uploading=$uploading tooLong=$tooLong blank=${text.isBlank()} editing=${editing != null}")
+            return
+        }
         val body = text
         if (editing != null) {
             sending = true
@@ -356,6 +361,7 @@ fun Composer(
             return
         }
         com.giracle.android.data.SendTrace.mark("tap")
+        val trace = SendLog.next()
         com.giracle.android.data.SendTrace.profileAfterTap()
         val ids = attachments.mapNotNull { it.fileId }
         val reply = replyTo?.id
@@ -376,32 +382,43 @@ fun Composer(
         val sessionUser = sessionStore.me.value?.id ?: graph.prefs.userId
         // 応答を待たずに、送ったものを一覧に出す (送信中の印つき、D-071)。添付があるときは出さない (応答の後に今までどおり出る)
         val localId = if (ids.isEmpty()) store.addPending(channelId, body, reply) else null
+        SendLog.log(trace, "tap", "len=${body.length} files=${ids.size} reply=${reply != null} shown=${localId != null}")
         if (localId != null) {
             com.giracle.android.data.SendTrace.mark("local_shown", "id=$localId")
             latestOnSent(localId)
         }
         graph.scope.launch(Dispatchers.Main.immediate) {
             try {
-                val sent = store.send(channelId, body, ids, reply, localId)
+                val sent = store.send(channelId, body, ids, reply, localId, trace)
                 com.giracle.android.data.SendTrace.mark("http_done", "id=${sent.id}")
-                if (graph.store !== sessionStore) return@launch
+                if (graph.store !== sessionStore) {
+                    SendLog.log(trace, "done", "after=session_changed")
+                    return@launch
+                }
                 // 仮のものを出したときは、押した時点で送ったものへ動かしてある
                 if (localId == null) latestOnSent(sent.id)
                 // 共有シート・ランチャーに、このチャンネルを直接の送り先として出す (#25)
                 com.giracle.android.ui.ChannelShortcuts.reportSent(appCtx, channelId, store.channels.value.firstOrNull { it.id == channelId }?.name)
                 // 送信中に次の文を打ち始めていたら、それは下書きとして残す (#79)
                 Drafts.finishSend(appCtx, channelId)
+                SendLog.log(trace, "done")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (graph.store !== sessionStore) return@launch
+                if (graph.store !== sessionStore) {
+                    // ログアウトした後なので、送信待ちにも下書きにも入れない (上の説明)
+                    SendLog.log(trace, "dropped", "reason=session_changed")
+                    return@launch
+                }
                 if (Outbox.isNetworkFailure(e)) {
                     // 電波が無いなど。送信待ちに入れ、つながったら送る (#30)
+                    SendLog.log(trace, "to_outbox")
                     graph.outbox.add(channelId, body, ids, reply, userId = sessionUser)
                     Drafts.finishSend(appCtx, channelId)
                     appCtx.toast("送信待ちにしました。つながったら送ります")
                 } else {
                     // 下書きに戻す。送信中に次の文を打ち始めていたら、消さずに後ろへ残す。開いている入力欄にも出る
+                    SendLog.log(trace, "to_draft")
                     Drafts.failSend(appCtx, channelId, keep, keepAttach)
                     appCtx.toast("送信できませんでした: ${e.userMessage()}")
                 }
