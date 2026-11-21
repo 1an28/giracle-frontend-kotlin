@@ -784,12 +784,32 @@ class ReleaseAppTest {
         var delivered = 0
         try {
             launch()
-            // ログインし直しが要らない: ホームが出て、ログイン画面が出ない
-            val home = waitDismissingSystemDialogs(res("screen.home"), 30_000)
-            loginKept = home != null && device.findObject(res("login.server_url")) == null
+            // ログインし直しが要らない: ログイン後の画面が出て、ログイン画面が出ない。
+            // 前回開いていた画面に戻るので、ホームとは限らない (前回のチャンネル画面に戻ることがある)
+            val first = waitDismissingSystemDialogs(By.res(Pattern.compile("screen\\.(home|channel)")), 30_000)
+            loginKept = first != null && device.findObject(res("login.server_url")) == null
             shot("upgrade_launch")
-            if (!loginKept) { dumpUi("上書き後の起動でホームが出ない") }
+            if (!loginKept) dumpUi("上書き後の起動でログイン後の画面が出ない")
             if (loginKept) {
+                var channelChecked = false
+                // チャンネルの下書きと送信待ちの表示を見る (圏外のまま)
+                fun checkChannel() {
+                    draftKept = pollUntil(5_000) { device.findObject(res("composer.input"))?.text?.contains(draft) == true }
+                    if (channelOffline) {
+                        outboxShown = device.wait(Until.findObject(res("composer.outbox")), 10_000) != null
+                        assertTrue("電波が無いのにサーバーに届いている (上書き後)", admin.recentTexts(channelId).none { it == queued })
+                    }
+                    shot("upgrade_channel")
+                    channelChecked = true
+                }
+                if (device.findObject(res("screen.channel")) != null) {
+                    // 前回の確認用チャンネルに戻った (ほかのチャンネルを開く手順は無いので、このチャンネルのはず)
+                    channelOffline = true
+                    checkChannel()
+                    hideKeyboard()
+                    device.pressBack()
+                }
+                wait(res("screen.home"), 10_000, "ホーム画面")
                 wait(res("home.settings"), 5_000, "設定ボタン").click()
                 wait(res("screen.settings"), 10_000, "設定画面")
                 wait(By.text(SETTING_TAB), 5_000, "チャットのタブ").click()
@@ -797,18 +817,15 @@ class ReleaseAppTest {
                 shot("upgrade_setting")
                 device.pressBack()
                 wait(res("screen.home"), 10_000, "ホーム画面に戻る")
-                // 前回の内容は圏外でも出るはず (P-2) だが、この確認の対象ではない。出なければ記録して電波を戻してから開く
-                device.wait(Until.findObject(res("home.channel:$channelId")), 15_000)
-                channelOffline = runCatching { findScrolling(res("home.channel:$channelId"), "確認用チャンネル (圏外)") }.isSuccess
-                if (!channelOffline) shell("cmd connectivity airplane-mode disable")
-                findScrolling(res("home.channel:$channelId"), "確認用チャンネル").click()
-                wait(res("screen.channel"), 10_000, "チャンネル画面")
-                draftKept = pollUntil(5_000) { device.findObject(res("composer.input"))?.text?.contains(draft) == true }
-                if (channelOffline) {
-                    outboxShown = device.wait(Until.findObject(res("composer.outbox")), 10_000) != null
-                    assertTrue("電波が無いのにサーバーに届いている (上書き後)", admin.recentTexts(channelId).none { it == queued })
+                if (!channelChecked) {
+                    // 前回の内容は圏外でも出るはず (P-2) だが、この確認の対象ではない。出なければ記録して電波を戻してから開く
+                    device.wait(Until.findObject(res("home.channel:$channelId")), 15_000)
+                    channelOffline = runCatching { findScrolling(res("home.channel:$channelId"), "確認用チャンネル (圏外)") }.isSuccess
+                    if (!channelOffline) shell("cmd connectivity airplane-mode disable")
+                    findScrolling(res("home.channel:$channelId"), "確認用チャンネル").click()
+                    wait(res("screen.channel"), 10_000, "チャンネル画面")
+                    checkChannel()
                 }
-                shot("upgrade_channel")
             }
         } finally {
             shell("cmd connectivity airplane-mode disable")
@@ -825,7 +842,7 @@ class ReleaseAppTest {
         )
         if (delivered == 0) shot("upgrade_not_delivered")
         assertAlive("上書き後")
-        assertTrue("上書きした後、ログインし直しが要る (ホームが出ない)", loginKept)
+        assertTrue("上書きした後、ログインし直しが要る (ログイン後の画面が出ない)", loginKept)
         assertTrue("上書きした後、設定 ($SETTING_LABEL) が残っていない", settingKept)
         assertTrue("上書きした後、下書きが残っていない", draftKept)
         // 圏外でチャンネルを開けなかったときは、表示は見られないが、届いた件数で残っていたことを確かめる
