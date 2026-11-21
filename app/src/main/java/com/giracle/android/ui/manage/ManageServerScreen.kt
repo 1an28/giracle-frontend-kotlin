@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -45,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -62,6 +64,7 @@ import com.giracle.android.ui.common.LocalGraph
 import com.giracle.android.ui.common.LocalStore
 import com.giracle.android.ui.common.RoleChip
 import com.giracle.android.ui.common.SubScreen
+import com.giracle.android.ui.common.TestTags
 import com.giracle.android.ui.common.fullTime
 import com.giracle.android.ui.common.humanSize
 import com.giracle.android.ui.common.parseColor
@@ -129,7 +132,8 @@ private fun ColumnScope.CommunityTab() {
     val defaults = remember(s) { mutableStateListOf<String>().apply { addAll(s.defaultJoinChannel.map { it.id }) } }
     var storage by remember { mutableStateOf<Long?>(null) }
     var bannerVer by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { storage = runCatching { graph.api.storageUsage() }.getOrNull() }
+    var storageReload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(storageReload) { storage = runCatching { graph.api.storageUsage() }.getOrNull() }
     val pickBanner = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) act { graph.api.changeServerBanner(ctx.uploadFileFrom(uri)); coil3.SingletonImageLoader.get(ctx).diskCache?.remove(graph.api.serverBannerUrl()); bannerVer++ }
     }
@@ -137,6 +141,7 @@ private fun ColumnScope.CommunityTab() {
     AsyncImage(model = graph.api.serverBannerUrl() + "?v=$bannerVer", contentDescription = "バナー", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(100.dp).background(MaterialTheme.colorScheme.surfaceVariant))
     OutlinedButton(onClick = { pickBanner.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text("バナーを変更") }
     storage?.let { Text("ストレージ使用量: ${humanSize(it)}", style = MaterialTheme.typography.bodySmall) }
+    OldFilesCleanup(onDeleted = { storageReload++ })
     OutlinedTextField(name, { name = it }, label = { Text("サーバー名") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(intro, { intro = it }, label = { Text("紹介文") }, modifier = Modifier.fillMaxWidth())
     Button(onClick = { act { graph.api.changeServerInfo(name.trim(), intro.trim()) } }, enabled = name.isNotBlank() && intro.isNotBlank()) { Text("名前と紹介文を保存") }
@@ -156,6 +161,64 @@ private fun ColumnScope.CommunityTab() {
     Button(onClick = {
         act { graph.api.changeServerConfig(regAvail, regInvite, announce, maxLen.toIntOrNull() ?: s.messageMaxLength, maxFile.toLongOrNull() ?: s.messageMaxFileSize, defaults.toList(), botEnabled); store.serverConfig.value = graph.api.serverConfig() }
     }) { Text("サーバー設定を保存") }
+}
+
+/** 古い添付ファイルを消す選択肢 (日数)。D-074 */
+private val OLD_FILE_DAYS = listOf(30, 90, 180, 365)
+
+/**
+ * 古い添付ファイルの削除 (DELETE server/delete-old-files、D-074)。
+ * 期間を選び、取り消せないことを確認してから消す。消した後は [onDeleted] で使用量を取り直す。
+ */
+@Composable
+private fun OldFilesCleanup(onDeleted: () -> Unit) {
+    val graph = LocalGraph.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var days by rememberSaveable { mutableIntStateOf(OLD_FILE_DAYS.last()) }
+    var confirming by remember { mutableStateOf(false) }
+    var running by remember { mutableStateOf(false) }
+    var hasMore by remember { mutableStateOf(false) }
+    Text("古いファイルを削除 (送られてから経った日数)", style = MaterialTheme.typography.titleSmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OLD_FILE_DAYS.forEach { d -> FilterChip(days == d, { days = d; hasMore = false }, label = { Text("$d 日") }) }
+    }
+    OutlinedButton(
+        enabled = !running, onClick = { confirming = true },
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        modifier = Modifier.testTag(TestTags.MANAGE_DELETE_OLD_FILES),
+    ) { Text(if (running) "削除しています…" else "$days 日より前のファイルを削除") }
+    if (hasMore) Text("まだ残っています。もう一度実行してください", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("$days 日より前のファイルを削除しますか？") },
+            text = {
+                Text(
+                    "$days 日より前に送られた添付ファイル (画像やファイル) を、サーバーから削除します。" +
+                        "古いメッセージの本文は残りますが、添付は見られなくなります。この操作は取り消せません。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    running = true
+                    val cutoff = java.time.Instant.now().minus(java.time.Duration.ofDays(days.toLong()))
+                    scope.launch {
+                        runCatching { graph.api.deleteOldFiles(cutoff) }
+                            .onSuccess { more ->
+                                hasMore = more
+                                ctx.toast(if (more) "一部を削除しました。まだ残っています" else "古いファイルを削除しました")
+                                onDeleted()
+                            }
+                            .onFailure { ctx.toast(it.userMessage()) }
+                        running = false
+                    }
+                }) { Text("削除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text("キャンセル") } },
+        )
+    }
 }
 
 @Composable
