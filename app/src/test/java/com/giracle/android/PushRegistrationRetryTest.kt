@@ -17,7 +17,7 @@ import org.junit.Test
 import org.unifiedpush.android.connector.FailedReason
 
 /**
- * プッシュ通知の登録のやり直し (#93、D-076)。間隔・打ち切り・やり直さない失敗・止め方を、仮の時計で確かめる。
+ * プッシュ通知の登録のやり直し (#93、D-077)。間隔・打ち切り・やり直さない失敗・止め方を、仮の時計で確かめる。
  * e2e (API 35) では、Google Play 開発者サービスが AUTHENTICATION_FAILED を返し、1 回の失敗で「登録しています」のまま止まっていた。
  */
 @OptIn(ExperimentalCoroutinesApi::class)

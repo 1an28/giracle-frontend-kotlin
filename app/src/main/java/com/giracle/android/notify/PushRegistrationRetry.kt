@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import org.unifiedpush.android.connector.FailedReason
 
 /**
- * 配信先への登録 (UnifiedPush の register) が失敗したときの、やり直しと状態 (#93、D-076)。
+ * 配信先への登録 (UnifiedPush の register) が失敗したときの、やり直しと状態 (#93、D-077)。
  *
  * 組み込みの FCM の配信は、Google Play 開発者サービスの準備 (端末の登録) が済んでいないと
  * `error=AUTHENTICATION_FAILED` を受け取り、UnifiedPush には INTERNAL_ERROR として返る。以前は 1 回の失敗で止まり、
@@ -123,7 +123,7 @@ class PushRegistrationRetry(
     }
 
     companion object {
-        /** やり直しの間隔: 5 秒・30 秒・2 分・10 分 (合わせて約 13 分)。見立ては D-076 */
+        /** やり直しの間隔: 5 秒・30 秒・2 分・10 分 (合わせて約 13 分)。見立ては D-077 */
         val DEFAULT_DELAYS_MS = listOf(5_000L, 30_000L, 120_000L, 600_000L)
 
         /** UnifiedPush の説明で「すぐにやり直してよい」(INTERNAL_ERROR)・「回線が戻ったら」(NETWORK) とされるもの */

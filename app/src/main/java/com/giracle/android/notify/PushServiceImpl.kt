@@ -30,7 +30,7 @@ class PushServiceImpl : PushService() {
     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
         Log.i(TAG, "new endpoint: ${endpoint.url.substringBefore("/fcm/send/").take(60)}")
         val g = graph
-        // 登録を頼んでいる間に、無効にした・ログアウトしたなら、遅れて届いた宛先は使わずに解く (D-076)
+        // 登録を頼んでいる間に、無効にした・ログアウトしたなら、遅れて届いた宛先は使わずに解く (D-077)
         if (g.prefs.pushOptOut || g.prefs.userId == null) {
             Log.i(TAG, "endpoint after opt-out or sign-out: unregister")
             g.pushRetry.reset()
@@ -101,7 +101,7 @@ class PushServiceImpl : PushService() {
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {
         Log.w(TAG, "registration failed: $reason")
-        // 一時的な失敗なら、間をおいてやり直す (#93、D-076)
+        // 一時的な失敗なら、間をおいてやり直す (#93、D-077)
         val retry = graph.pushRetry
         retry.failed(reason)
         Log.i(TAG, "retry state: ${retry.state.value}")

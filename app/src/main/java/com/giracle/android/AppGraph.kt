@@ -57,7 +57,7 @@ class AppGraph(context: Context) {
     val api = GiracleApi(http, endpoint)
     val ws = WsClient(http, scope) { endpoint }
 
-    /** プッシュ通知の登録が一時的に失敗したときのやり直し (#93、D-076) */
+    /** プッシュ通知の登録が一時的に失敗したときのやり直し (#93、D-077) */
     val pushRetry = com.giracle.android.notify.PushRegistrationRetry(scope) { vapid ->
         withContext(Dispatchers.IO) { org.unifiedpush.android.connector.UnifiedPush.register(appContext, vapid = vapid) }
     }

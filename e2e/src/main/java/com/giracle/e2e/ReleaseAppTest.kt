@@ -209,7 +209,7 @@ class ReleaseAppTest {
         waitFor("前面サービスが止まる", 15_000) { !shell("dumpsys activity services $pkg").contains("isForeground=true") }
         val status = res("settings.push_status")
         findScrolling(status, "プッシュ通知の状態")
-        // 有効になった経路 (auto: 自動の登録とそのやり直し、button: ボタン) と、アプリが登録をやり直した回数を残す (#93、D-076)。
+        // 有効になった経路 (auto: 自動の登録とそのやり直し、button: ボタン) と、アプリが登録をやり直した回数を残す (#93、D-077)。
         // 登録の失敗は、Google Play 開発者サービスの準備が済んでいないとき (AUTHENTICATION_FAILED) に起きる
         var via = "auto"
         if (!pushEnabled(status, 60_000)) {

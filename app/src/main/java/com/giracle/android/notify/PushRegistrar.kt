@@ -115,7 +115,7 @@ object PushRegistrar {
         autoTriedFor = null
     }
 
-    /** 設定画面に出す、今の状態の説明。[retry] は登録のやり直しの状態 (#93、D-076) */
+    /** 設定画面に出す、今の状態の説明。[retry] は登録のやり直しの状態 (#93、D-077) */
     fun status(context: Context, endpoint: String?, retry: PushRegistrationRetry.State): String {
         if (endpoint == null) retryStatus(retry, embedded = runCatching { UnifiedPush.getSavedDistributor(context) }.getOrNull() == context.packageName)?.let { return it }
         val dists = runCatching { UnifiedPush.getDistributors(context) }.getOrDefault(emptyList())
