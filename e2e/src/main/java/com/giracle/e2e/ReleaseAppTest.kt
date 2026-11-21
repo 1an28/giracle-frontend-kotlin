@@ -91,7 +91,7 @@ class ReleaseAppTest {
         clickSendChecked(sent)
         // 入力欄の文字に当たらないよう、メッセージの一覧の中だけで探す (入力欄に残ったままでも通っていた)
         wait(res("channel.messages").hasDescendant(By.textContains(sent)), 15_000, "自分の送信 (一覧の中)")
-        waitFor("サーバーに送信が届く") { admin.recentTexts(channelId).contains(sent) }
+        waitServerSend(sent)
         shot("sent")
 
         // 6. 受信 (WebSocket): 相手の送信が、取り直さずに画面に出る
@@ -583,7 +583,7 @@ class ReleaseAppTest {
         try {
             SystemClock.sleep(3_000)
             wait(res("composer.input"), 10_000, "入力欄").apply { click(); text = offline }
-            wait(res("composer.send"), 5_000, "送信ボタン").click()
+            waitSendButtonSettled("送信ボタン").click()
             wait(res("composer.outbox"), 30_000, "送信待ちの表示 (composer.outbox)")
             shot("outbox")
             assertTrue("電波が無いのにサーバーに届いている", admin.recentTexts(channelId).none { it == offline })
@@ -651,7 +651,7 @@ class ReleaseAppTest {
             shot("offline_start")
             // 書ける (P-2): 圏外で起動したままでも、送ると送信待ちになる (D-029)
             wait(res("composer.input"), 10_000, "入力欄 (圏外で起動)").apply { click(); text = mine }
-            wait(res("composer.send"), 5_000, "送信ボタン (圏外で起動)").click()
+            waitSendButtonSettled("送信ボタン (圏外で起動)").click()
             outboxShown = device.wait(Until.findObject(res("composer.outbox")), 20_000) != null
             hideKeyboard()
             // 圏外の間に、相手が送る (端末の外のこと。電波が戻ったら見えるはず)
@@ -787,15 +787,73 @@ class ReleaseAppTest {
     }
 
     private fun waitFor(what: String, timeoutMs: Long = 10_000, cond: () -> Boolean) {
-        val end = SystemClock.uptimeMillis() + timeoutMs
-        while (SystemClock.uptimeMillis() < end) {
-            if (runCatching(cond).getOrDefault(false)) return
-            SystemClock.sleep(500)
-        }
+        if (pollUntil(timeoutMs, cond)) return
         shot("timeout")
         dumpUi("「$what」が満たされない")
         fail("$what (${timeoutMs / 1000} 秒待った)")
     }
+
+    /** [cond] が満たされるまで待つ。満たされたら true */
+    private fun pollUntil(timeoutMs: Long, cond: () -> Boolean): Boolean {
+        val end = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < end) {
+            if (runCatching(cond).getOrDefault(false)) return true
+            SystemClock.sleep(500)
+        }
+        return false
+    }
+
+    /**
+     * 自分の送信がサーバーに届くのを待つ (10 秒)。届かなければ失敗にする (判定は [waitFor] と同じ)。
+     * #94: 届かなかったとき、遅れただけか・失われたか・本文が違うものが届いたかを分けるため、さらに最大 60 秒待ち、
+     * 行方を E2E-RESULT send_server として残してから失敗にする (遅れて届いても失敗のまま。隠さない)
+     */
+    private fun waitServerSend(sent: String) {
+        val what = "サーバーに送信が届く"
+        if (pollUntil(10_000) { admin.recentTexts(channelId).contains(sent) }) return
+        shot("timeout")
+        dumpUi("「$what」が満たされない")
+        val t0 = SystemClock.uptimeMillis()
+        val late = pollUntil(60_000) { admin.recentTexts(channelId).contains(sent) }
+        val lateMs = SystemClock.uptimeMillis() - t0
+        val texts = runCatching { admin.recentTexts(channelId) }.getOrNull()
+        // 送った文字を含むが一致しないもの (押し損ねでキーボードの文字が足された、など)。確認用の文字なので記録してよい
+        val similar = texts.orEmpty().filter { it != sent && it.contains(sent) }.map { it.visible() }
+        val outcome = when {
+            late -> "late"
+            similar.isNotEmpty() -> "different_text"
+            texts == null -> "unknown"
+            else -> "missing"
+        }
+        Log.w(TAG, "E2E-RESULT send_server outcome=$outcome extra_wait_ms=$lateMs count=${texts?.size} similar=$similar")
+        fail("$what (10 秒待った。その後の行方: $outcome)")
+    }
+
+    /**
+     * 押す前に、キーボードが出て送信ボタンの位置が落ち着くのを待つ (#94、[clickAllowSettled] と同じ考え)。
+     * 入力欄を押した直後はキーボードが出る途中で、前の位置を押すとキーボード (Gboard の右下のキー) に当たり、
+     * 入力欄に文字が足されたことがあった (2026-11-21 の main の e2e。推測)。
+     * キーボードが出ていて、ボタンの位置が 2 回続けて同じなら落ち着いたとみる。5 秒で落ち着かなくても押す (押し損ねは呼ぶ側が記録する)
+     */
+    private fun waitSendButtonSettled(what: String): UiObject2 {
+        wait(res("composer.send"), 5_000, what)
+        val t0 = SystemClock.uptimeMillis()
+        var last: android.graphics.Rect? = null
+        var same = 0
+        var ime = false
+        while (SystemClock.uptimeMillis() - t0 < 5_000) {
+            ime = imeShown()
+            val b = device.findObject(res("composer.send"))?.visibleBounds
+            same = if (ime && b != null && b == last) same + 1 else 0
+            if (same >= 2) break
+            last = b
+            SystemClock.sleep(250)
+        }
+        Log.i(TAG, "E2E-RESULT send_tap_settle ms=${SystemClock.uptimeMillis() - t0} ime_shown=$ime settled=${same >= 2} bounds=$last")
+        return wait(res("composer.send"), 5_000, what)
+    }
+
+    private fun imeShown(): Boolean = shell("dumpsys input_method").contains("mInputShown=true")
 
     /**
      * 送信ボタンを押し、入力欄が空になる (アプリが送信を受け付けた) ことを確かめる。
@@ -804,13 +862,15 @@ class ReleaseAppTest {
      * 押し直したことは E2E-RESULT send_tap_retry として残し、e2e-run.sh が警告にする (見えなくしない)
      */
     private fun clickSendChecked(text: String) {
-        val btn = wait(res("composer.send"), 5_000, "送信ボタン")
+        val btn = waitSendButtonSettled("送信ボタン")
         val before = btn.visibleBounds
         btn.click()
         if (waitInputCleared(text, 3_000)) return
         val after = device.findObject(res("composer.send"))?.visibleBounds
-        val ime = shell("dumpsys input_method").contains("mInputShown=true")
-        Log.w(TAG, "E2E-RESULT send_tap_retry before=$before after=$after ime_shown=$ime")
+        val ime = imeShown()
+        // 押し損ねがキーボードに当たると、入力欄に文字が足される。改行などが見えるようにして残す (確認用の文字なので記録してよい)
+        val input = device.findObject(res("composer.input"))?.text?.visible()
+        Log.w(TAG, "E2E-RESULT send_tap_retry before=$before after=$after ime_shown=$ime input=$input")
         dumpUi("送信ボタンを押しても入力欄が空にならない")
         wait(res("composer.send"), 5_000, "送信ボタン (押し直し)").click()
         if (!waitInputCleared(text, 5_000)) fail("送信ボタンを 2 回押しても、送信を受け付けない (入力欄に残ったまま)")
@@ -830,10 +890,14 @@ class ReleaseAppTest {
         runCatching {
             Log.i(TAG, "UI-DUMP $reason")
             device.findObjects(By.res(Pattern.compile(".+"))).take(60).forEach { o ->
-                Log.i(TAG, "UI-DUMP  ${o.resourceName} text=${o.text?.take(60)} enabled=${o.isEnabled}")
+                // 改行を含む文字は、そのままだと logcat の行が分かれて抜き出しから落ちる (#94)。見える形にする
+                Log.i(TAG, "UI-DUMP  ${o.resourceName} text=${o.text?.take(60)?.visible()} enabled=${o.isEnabled}")
             }
         }
     }
+
+    /** 改行・タブを見える形にする (ログの 1 行に収めるため) */
+    private fun String.visible(): String = replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
     private fun assertAlive(whenDoing: String) {
         if (shell("pidof $pkg").isBlank()) fail("$whenDoing にアプリのプロセスが無い (落ちた可能性。logcat の crash バッファを見る)")
