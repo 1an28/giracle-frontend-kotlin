@@ -54,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -257,9 +258,16 @@ fun Composer(
     val usersState = store.users.collectAsStateWithLifecycle()
     // 見た目は履歴のメンション (MessageItem、自分以外宛て) と同じ
     val scheme = MaterialTheme.colorScheme
-    val mentionTransform = remember(usersState, scheme.surfaceVariant, scheme.onSurface) {
+    val nameOf = remember(usersState) { { id: String -> usersState.value[id]?.name } }
+    val mentionTransform = remember(nameOf, scheme.surfaceVariant, scheme.onSurface) {
         val style = androidx.compose.ui.text.SpanStyle(background = scheme.surfaceVariant, color = scheme.onSurface, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-        MentionTransformations({ id -> usersState.value[id]?.name }, style)
+        MentionTransformations(nameOf, style)
+    }
+    // 名前が後から届いて表示が変わったら、入力中の IME に読み直させる (IME が古い表示の位置で編集しないように)
+    val view = androidx.compose.ui.platform.LocalView.current
+    val inputFocused = remember { booleanArrayOf(false) }
+    OnMentionNamesChanged(state, nameOf) {
+        if (inputFocused[0]) view.context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.restartInput(view)
     }
     // 下書き・編集の本文にある人の名前を取りに行く (名前が届くまでは `@<id>` のまま見える)
     LaunchedEffect(state) {
@@ -493,7 +501,7 @@ fun Composer(
                     state = state,
                     inputTransformation = mentionTransform.input,
                     outputTransformation = mentionTransform.output,
-                    modifier = Modifier.weight(1f).heightIn(max = 180.dp).testTag(TestTags.COMPOSER_INPUT).onPreviewKeyEvent { e ->
+                    modifier = Modifier.weight(1f).heightIn(max = 180.dp).testTag(TestTags.COMPOSER_INPUT).onFocusChanged { inputFocused[0] = it.isFocused }.onPreviewKeyEvent { e ->
                         // ハードウェアキーボード: Enter で送信 (設定 ON 時)、Shift+Enter で改行
                         if (settings.sendWithEnter && e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) { submit(); true } else false
                     }.then(
