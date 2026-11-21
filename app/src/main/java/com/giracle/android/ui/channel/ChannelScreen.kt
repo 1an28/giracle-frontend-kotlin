@@ -280,10 +280,23 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
     // Element X と同じ考え方 (docs/RESEARCH.md)。送ったものが画面の外にあると、送れたかを確かめるためにスクロールし直すことになる。
     // 一覧に載るのを待ってから動かす。載る前に動かすと、LazyColumn が今の先頭の行 (キー) に位置を合わせ直し、送ったものが画面の外に残る
     var sentId by remember(channelId) { mutableStateOf<String?>(null) }
+    // 動かす処理は効果の外 (画面のスコープ) で走らせる。効果は history.version で始め直すので、
+    // 中で動かすと、仮のものが本物に置き換わった (version が進んだ) ときに動きの途中で取り消される (D-078)
+    var sentScroll by remember(channelId) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     LaunchedEffect(sentId, history.version) {
-        // 仮のもの (D-071) が、動かす前に本物へ置き換わっていたら、本物を探す
-        val id = sentId?.let(store::resolveSent) ?: return@LaunchedEffect
-        val i = history.messages.indexOfFirst { it.id == id }
+        val local = sentId ?: return@LaunchedEffect
+        // 仮のもの (D-071) が本物へ置き換わっていれば本物を探す。ただし置き換えの知らせ (resolveSent) は、
+        // 画面の一覧 (history) が組み直されるより先に届く。本物がまだ一覧に無ければ、一覧にある仮のものへ動く。
+        // 本物だけを探すと、仮のものが載っていても次の組み直し (メインが空いた後) まで待つことになる (D-078 の記録)
+        val resolved = store.resolveSent(local)
+        var id = resolved
+        var i = history.messages.indexOfFirst { it.id == resolved }
+        if (i < 0 && resolved != local) {
+            i = history.messages.indexOfFirst { it.id == local }
+            if (i >= 0) id = local
+        }
+        // 効果が動いた時刻と、そのとき送ったものが一覧にあったか (D-078)
+        SendTrace.mark("effect_start", "id=$id v=${history.version} index=$i")
         if (i < 0) return@LaunchedEffect
         sentId = null
         // 一覧の先頭に「新しい側を読み込み中」の行があると、位置が 1 つずれる
@@ -292,14 +305,17 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
         val jump = kotlin.math.abs(listState.firstVisibleItemIndex - target) > 10
         // 送信が見えるまでの内訳の記録 (#70)。e2e の reply がこれを読む
         SendTrace.mark("in_list", "id=$id index=$i first=${listState.firstVisibleItemIndex} target=$target jump=$jump")
-        try {
-            if (jump) listState.scrollToItem(target) else listState.animateScrollToItem(target)
-            SendTrace.mark("scroll_done", "first=${listState.firstVisibleItemIndex}")
-            withFrameNanos { }
-            SendTrace.mark("frame", "first=${listState.firstVisibleItemIndex}")
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            SendTrace.mark("scroll_cancelled", "first=${listState.firstVisibleItemIndex}")
-            throw e
+        sentScroll?.cancel()
+        sentScroll = scope.launch {
+            try {
+                if (jump) listState.scrollToItem(target) else listState.animateScrollToItem(target)
+                SendTrace.mark("scroll_done", "first=${listState.firstVisibleItemIndex}")
+                withFrameNanos { }
+                SendTrace.mark("frame", "first=${listState.firstVisibleItemIndex}")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                SendTrace.mark("scroll_cancelled", "first=${listState.firstVisibleItemIndex}")
+                throw e
+            }
         }
     }
     val onSent: (String) -> Unit = { id ->
@@ -388,6 +404,8 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
                     LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().testTag(TestTags.CHANNEL_MESSAGES)) {
                         if (!history.atEnd) item(key = "newer", contentType = "loader") { Loader() }
                         itemsIndexed(messages, key = { _, m -> m.id }, contentType = { _, m -> if (m.isSystemMessage) "sys" else "msg" }) { i, m ->
+                            // 仮のもの (D-071) の行を初めて組み立てた時刻。送信の続きより後に回っているかを見る (D-078)
+                            if (m.pending) remember(m.id) { SendTrace.mark("row_local", "id=${m.id}") }
                             val older = messages.getOrNull(i + 1)
                             val newer = messages.getOrNull(i - 1)
                             // 新着線: この行が既読最後で、より新しい行がある
