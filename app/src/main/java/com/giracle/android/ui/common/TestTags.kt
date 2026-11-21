@@ -71,6 +71,12 @@ object TestTags {
     fun image(fileId: String, loaded: Boolean) = (if (loaded) "channel.image_loaded:" else "channel.image:") + fileId
     /** 画像の全画面表示 */
     const val IMAGE_VIEWER = "channel.image_viewer"
+    /** 画像の読み込みに失敗した印 (押すと出し直す、#129) */
+    const val IMAGE_RETRY = "channel.image_retry"
+    /** 画像がサーバーに無い (404) 印 (#129) */
+    const val IMAGE_GONE = "channel.image_gone"
+    /** 画像を取れたが表示できない印 (#129) */
+    const val IMAGE_UNSUPPORTED = "channel.image_unsupported"
     fun expandLongText(messageId: String) = "channel.expand:$messageId"
     const val LONG_TEXT_DIALOG = "channel.long_text"
     const val COMPOSER_INPUT = "composer.input"
