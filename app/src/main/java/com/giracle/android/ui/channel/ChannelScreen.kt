@@ -80,7 +80,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.compose.AsyncImage
+import androidx.compose.foundation.Image
+import coil3.compose.rememberAsyncImagePainter
+import com.giracle.android.ui.common.ImageFailureMark
+import com.giracle.android.ui.common.RetryOnReconnect
+import com.giracle.android.ui.common.imageFailureOf
 import com.giracle.android.ui.common.exposeTestTags
 import com.giracle.android.ui.common.TestTags
 import com.giracle.android.data.ChatStore
@@ -609,6 +613,17 @@ fun ImageViewer(f: FileAttached, url: String, onDismiss: () -> Unit, onSave: () 
                 // 一覧の小さい画像と、キャッシュを分ける (一覧が、ここで読んだ大きい画像を使い回してメモリを握り続けないように)
                 .memoryCacheKey("$url#full").build()
         }
+        val painter = rememberAsyncImagePainter(
+            req, contentScale = ContentScale.Fit,
+            onSuccess = { st ->
+                intrinsic = st.painter.intrinsicSize
+                // 読み込む前に拡大していたら、画像の大きさが分かったところで動かせる幅に収め直す
+                offset = clamp(offset, scale)
+            },
+        )
+        val state by painter.state.collectAsStateWithLifecycle()
+        val failure = imageFailureOf(state)
+        RetryOnReconnect(failure, LocalGraph.current.ws.state) { painter.restart() }
         Box(
             Modifier.fillMaxSize().exposeTestTags().testTag(TestTags.IMAGE_VIEWER).background(Color.Black)
                 .onSizeChanged { box = it; offset = clamp(offset, scale) }
@@ -634,15 +649,12 @@ fun ImageViewer(f: FileAttached, url: String, onDismiss: () -> Unit, onSave: () 
                     }
                 },
         ) {
-            AsyncImage(
-                model = req, contentDescription = f.actualFileName, contentScale = ContentScale.Fit,
-                onSuccess = { st ->
-                    intrinsic = st.painter.intrinsicSize
-                    // 読み込む前に拡大していたら、画像の大きさが分かったところで動かせる幅に収め直す
-                    offset = clamp(offset, scale)
-                },
+            Image(
+                painter, f.actualFileName, contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
             )
+            // 失敗したら一覧と同じ印を出す。背景を押すと閉じるので、出し直しは印を押したときだけ (#129、D-074)
+            ImageFailureMark(failure, Modifier.align(Alignment.Center), onDark = true, onRetry = { painter.restart() })
             Row(
                 Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

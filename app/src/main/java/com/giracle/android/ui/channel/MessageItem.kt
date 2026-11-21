@@ -6,7 +6,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -57,6 +59,17 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.compose.AsyncImagePainter
+import coil3.compose.LocalPlatformContext
+import com.giracle.android.data.net.WsClient
+import kotlinx.coroutines.flow.StateFlow
+import coil3.compose.rememberAsyncImagePainter
+import com.giracle.android.ui.common.ImageFailure
+import com.giracle.android.ui.common.ImageFailureMark
+import com.giracle.android.ui.common.RetryOnReconnect
+import com.giracle.android.ui.common.imageFailureOf
 import coil3.request.ImageRequest
 import com.giracle.android.ui.common.TestTags
 import com.giracle.android.data.ChatStore
@@ -414,16 +427,43 @@ private fun ImageAttachment(f: FileAttached, size: ImageSize?, cb: MessageCallba
     val maxPx = with(LocalDensity.current) { 320.dp.roundToPx() }
     val url = graph.api.fileUrl(f.id)
     val req = remember(url) { ImageRequest.Builder(ctx).data(url).size(maxPx).precision(coil3.size.Precision.INEXACT).build() }
-    // 読み込みが済んだかを testTag で外から分かるようにする (画像の読み込みは画面の情報に出ないため。D-016、#20)
-    var loaded by remember(url) { mutableStateOf(false) }
-    AsyncImage(
-        model = req, contentDescription = f.actualFileName, contentScale = ContentScale.Fit,
-        onSuccess = { loaded = true },
-        modifier = Modifier.testTag(TestTags.image(f.id, loaded)).padding(vertical = 4.dp).widthIn(max = 320.dp).heightIn(max = 320.dp)
+    AttachedImage(req, f.actualFileName, ratio, graph.ws.state, onOpen = { cb.onImageClick(f) }, tag = { TestTags.image(f.id, it) })
+}
+
+/**
+ * 添付画像の枠。失敗したら枠の中に印を出し、押す・接続が戻ると出し直す。サーバーに無い (404) なら出し直さない (#129、D-074)。
+ * 読み込みが済んだかを testTag ([tag]) で外から分かるようにする (画像の読み込みは画面の情報に出ないため。D-016、#20)。
+ * [imageLoader] はテストで差し替える
+ */
+@Composable
+internal fun AttachedImage(
+    request: ImageRequest,
+    contentDescription: String?,
+    ratio: Float?,
+    connection: StateFlow<WsClient.State>,
+    onOpen: () -> Unit,
+    tag: (loaded: Boolean) -> String,
+    imageLoader: ImageLoader = SingletonImageLoader.get(LocalPlatformContext.current),
+) {
+    val painter = rememberAsyncImagePainter(request, imageLoader, contentScale = ContentScale.Fit)
+    val state by painter.state.collectAsStateWithLifecycle()
+    val loaded = state is AsyncImagePainter.State.Success
+    val failure = imageFailureOf(state)
+    RetryOnReconnect(failure, connection) { painter.restart() }
+    Box(
+        Modifier.testTag(tag(loaded)).padding(vertical = 4.dp).widthIn(max = 320.dp).heightIn(max = 320.dp)
             .then(if (ratio != null) Modifier.aspectRatio(ratio) else Modifier.heightIn(min = 120.dp))
             .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { cb.onImageClick(f) },
-    )
+            // 表示できない形式 (Unsupported) は、全画面表示から保存・共有してほかのアプリで開けるよう、押したら開く
+            .clickable(enabled = failure != ImageFailure.Gone) {
+                if (failure == ImageFailure.Retryable) painter.restart() else onOpen()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        // 縦横比が分かっていれば枠いっぱいに、分からなければ画像の大きさで描く
+        Image(painter, contentDescription, if (ratio != null) Modifier.fillMaxSize() else Modifier, contentScale = ContentScale.Fit)
+        ImageFailureMark(failure)
+    }
 }
 
 @Composable
