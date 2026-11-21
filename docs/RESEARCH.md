@@ -190,3 +190,23 @@
 - 推測: 「短い切れ目では出さない」「出すなら読む場所を奪わない」の 2 つは、良いとされるアプリで共通している。
   Slack は公式のヘルプに灰色の帯で WebSocket の問題を出すと書く (検索結果の要約まで。原文は読んでいない)
 - 次: D-073 で、チャンネルの題名の下の行に、3 秒続いたら出す形にした
+
+## 2026-11-21
+
+### 上流の更新で、アプリが壊れるところ・合わせるところはあるか
+- 入り口: ROADMAP の「定期的に見るもの」。前に見てから 1 週間たっていた
+- 確かめたこと: backend は `87be860` → `dd67d26`。c413659 (#180) で、管理者 (manageServer) 向けに `DELETE /server/delete-old-files` (body `deleteOlderThan`、応答 `data.hasMoreFiles`) が増え、
+  添付の行に `createdAt` が足された。消すのはファイルと添付の行の両方で、WebSocket での知らせは無い (`messageFileAttached.query.ts` を読んだ)。
+  dd67d26 (#181) は 1 メッセージの URL プレビューを先頭 10 件までにした。Web 版 `c34d0cc` はモック環境とパッケージの更新だけ。Flutter 版は `db71cb6` のまま
+- 確かめたこと: アプリの JSON の読み方は余計なキーを無視する (`Http.kt` の `ignoreUnknownKeys = true`)。CI は毎回 backend の最新を使う (D-016) ので、`dd67d26` の後の main の live-test・e2e (2026-11-20) が通っている
+- 次: 古い添付の削除を、サーバー管理画面に入れる (子セッションに渡した)
+
+### 画像が読み込めなかったとき、良いアプリと読み込みの部品はどうしているか
+- 入り口: 上の「古い添付が消える」から、消えた画像をアプリがどう出すかを見て、失敗したときの表示が無いと気づいた (#129)
+- 確かめたこと: Coil は回線が戻っても要求を出し直さない。coil-kt/coil #132 (2019 年から開いたまま) で作者が
+  「Coil will automatically force reading from the disk cache if you're offline, but it won't restart a request when you come back online」(2019-09-30) と書き、
+  2025-08-11 にも「足さない方に傾いている。使う側が回線の見張りを置き、`AsyncImagePainter.restart` か要求の値を変えて出し直せる」と書いている (原文を読んだ)
+- 確かめたこと: Coil の Compose の説明 (coil-kt.github.io/coil/compose/) には、`error` を渡さないときに何が出るかは書いていない
+- 確かめられなかったこと: Signal・Telegram が失敗した画像をどう出すか。検索では古い不具合の報告 (Signal の MMS の「tap to retry」、2017〜2018 年) しか出ず、今の版の動きは分からない。
+  アプリのコードを読めば分かる見込み (次に #129 を直すときに読む)
+- 推測: 失敗の印と、押して出し直す・回線が戻ったら出し直すは、アプリ側で作る必要がある
