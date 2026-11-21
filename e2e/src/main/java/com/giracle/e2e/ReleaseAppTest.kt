@@ -209,15 +209,21 @@ class ReleaseAppTest {
         waitFor("前面サービスが止まる", 15_000) { !shell("dumpsys activity services $pkg").contains("isForeground=true") }
         val status = res("settings.push_status")
         findScrolling(status, "プッシュ通知の状態")
+        // 有効になった経路 (auto: 自動の登録とそのやり直し、button: ボタン) と、アプリが登録をやり直した回数を残す (#93、D-077)。
+        // 登録の失敗は、Google Play 開発者サービスの準備が済んでいないとき (AUTHENTICATION_FAILED) に起きる
+        var via = "auto"
         if (!pushEnabled(status, 60_000)) {
-            // 自動の登録が済んでいなければ、ボタンで登録する (Google Play 開発者サービスの準備が遅いことがある)
+            // 自動の登録 (やり直しを含む) で済んでいなければ、ボタンで登録する
             Log.w(TAG, "自動では有効になっていない: " + device.findObject(status)?.text)
+            via = "button"
             findScrolling(res("settings.push_enable"), "プッシュ通知の有効化ボタン").click()
             if (!pushEnabled(status, 90_000)) {
                 shot("push_status")
+                Log.i(TAG, "E2E-RESULT push enabled=false failures=${pushFailures()}")
                 fail("プッシュ通知が有効にならない: " + device.findObject(status)?.text)
             }
         }
+        Log.i(TAG, "E2E-RESULT push enabled=true via=$via failures=${pushFailures()}")
         Log.i(TAG, "プッシュ通知の状態: " + device.findObject(status)?.text)
         shot("push_enabled")
 
@@ -696,6 +702,10 @@ class ReleaseAppTest {
     }
 
     private fun shareUri(name: String): android.net.Uri = android.net.Uri.parse("content://${ShareProvider.AUTHORITY}/$name")
+
+    /** アプリが受け取った、配信先への登録の失敗の回数 (やり直した回数の目安) */
+    private fun pushFailures(): Int =
+        shell("logcat -d -s GiraclePush:W").lines().count { "registration failed" in it }
 
     private fun pushEnabled(status: BySelector, timeoutMs: Long): Boolean {
         val end = SystemClock.uptimeMillis() + timeoutMs
