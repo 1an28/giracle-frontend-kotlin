@@ -281,11 +281,14 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
     // 一覧に載るのを待ってから動かす。載る前に動かすと、LazyColumn が今の先頭の行 (キー) に位置を合わせ直し、送ったものが画面の外に残る
     var sentId by remember(channelId) { mutableStateOf<String?>(null) }
     LaunchedEffect(sentId, history.version) {
-        // 仮のもの (D-071) が、動かす前に本物へ置き換わっていたら、本物を探す
-        val id = sentId?.let(store::resolveSent) ?: return@LaunchedEffect
-        val i = history.messages.indexOfFirst { it.id == id }
-        // 効果が動いた時刻と、そのとき送ったものが一覧にあったか。置き換えで効果がやり直しになっているかを見分ける (D-078)
-        SendTrace.mark("effect_start", "id=$id v=${history.version} index=$i")
+        val sent = sentId ?: return@LaunchedEffect
+        // 仮のもの (D-071) が、動かす前に本物へ置き換わっていたら、本物を探す。
+        // 置き換えの対応 (resolveSent) は WebSocket の受信で先に書き換わり、この効果が見ている一覧 (history) はまだ仮のもののことがある。
+        // そのときは仮のもので動かす (本物だけを探すと、一覧が次に組み立て直されるまで動けず、送ったものへ動くのが遅れていた。D-078)
+        val id = store.resolveSent(sent)
+        val i = history.messages.indexOfFirst { it.id == id || it.id == sent }
+        // 効果が動いた時刻と、そのとき送ったものが一覧にあったか (D-078)
+        SendTrace.mark("effect_start", "id=$id sent=$sent v=${history.version} index=$i")
         if (i < 0) return@LaunchedEffect
         sentId = null
         // 一覧の先頭に「新しい側を読み込み中」の行があると、位置が 1 つずれる
@@ -293,7 +296,7 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
         // 遠ければ一気に、近ければ動かして (Element X と同じく 10 行を境にする)
         val jump = kotlin.math.abs(listState.firstVisibleItemIndex - target) > 10
         // 送信が見えるまでの内訳の記録 (#70)。e2e の reply がこれを読む
-        SendTrace.mark("in_list", "id=$id index=$i first=${listState.firstVisibleItemIndex} target=$target jump=$jump")
+        SendTrace.mark("in_list", "id=${history.messages[i].id} index=$i first=${listState.firstVisibleItemIndex} target=$target jump=$jump")
         try {
             if (jump) listState.scrollToItem(target) else listState.animateScrollToItem(target)
             SendTrace.mark("scroll_done", "first=${listState.firstVisibleItemIndex}")

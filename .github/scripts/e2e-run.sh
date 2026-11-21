@@ -142,7 +142,7 @@ echo "::group::e2e の結果の印"; grep -o "E2E-RESULT .*" "$OUT/logcat.txt"; 
 echo "::group::よく使う作業の手数と時間 (ux)"
 grep -oE "E2E-RESULT ux net=.*" "$OUT/logcat.txt" | sed "s/E2E-RESULT ux //"
 # 手がかり: 再同期・スナップショットからの復元・アプリのプロセスの起動 (つなぎ直した後の切り替えの値を読むため)・送信の区切り (GiraclePerf、#70)
-grep -E " I GiracleSync: | I GiraclePerf: | I GiracleE2E: E2E-RESULT ux|ActivityManager: Start proc [0-9]+:$APP_PKG" "$OUT/logcat.txt" | tail -n 60
+grep -E " I GiracleSync: | I GiraclePerf: | I GiracleE2E: E2E-RESULT ux|ActivityManager: Start proc [0-9]+:$APP_PKG" "$OUT/logcat.txt" | tail -n 200
 echo "::endgroup::"
 # 送信を押した直後の描画の間隔と、メイン・Default のスレッドのスタック (#70、D-068)。R8 の名前を mapping.txt で元に戻して出す
 echo "::group::送信を押した直後のスレッドのスタック (GiraclePerfTrace)"
