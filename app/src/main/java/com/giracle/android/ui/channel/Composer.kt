@@ -387,10 +387,16 @@ fun Composer(
                 if (graph.store !== sessionStore) return@launch
                 // 仮のものを出したときは、押した時点で送ったものへ動かしてある
                 if (localId == null) latestOnSent(sent.id)
-                // 共有シート・ランチャーに、このチャンネルを直接の送り先として出す (#25)
-                com.giracle.android.ui.ChannelShortcuts.reportSent(appCtx, channelId, store.channels.value.firstOrNull { it.id == channelId }?.name)
                 // 送信中に次の文を打ち始めていたら、それは下書きとして残す (#79)
                 Drafts.finishSend(appCtx, channelId)
+                // 共有シート・ランチャーに、このチャンネルを直接の送り先として出す (#25)。
+                // 登録は Binder の呼び出しで、メインスレッドで行うと、送ったものを一覧に出す描画がその分遅れる (#136、D-078)。
+                // ShortcutManagerCompat はメインスレッドを求めていない (AndroidX のソースで確かめた) ので、IO で行う
+                val channelName = store.channels.value.firstOrNull { it.id == channelId }?.name
+                graph.scope.launch(Dispatchers.IO) {
+                    // 間にログアウトしていたら、前のアカウントのチャンネルを登録しない
+                    if (graph.store === sessionStore) com.giracle.android.ui.ChannelShortcuts.reportSent(appCtx, channelId, channelName)
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
