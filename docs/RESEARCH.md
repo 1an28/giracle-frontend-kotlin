@@ -203,9 +203,11 @@
 
 ### 画像が読み込めなかったとき、良いアプリと読み込みの部品はどうしているか
 - 入り口: 上の「古い添付が消える」から、消えた画像をアプリがどう出すかを見て、失敗したときの表示が無いと気づいた (#129)
-- 確かめたこと: Coil は回線が戻っても要求を出し直さない。coil-kt/coil #132 (2019 年から開いたまま) で作者が
-  「Coil will automatically force reading from the disk cache if you're offline, but it won't restart a request when you come back online」(2019-09-30) と書き、
-  2025-08-11 にも「足さない方に傾いている。使う側が回線の見張りを置き、`AsyncImagePainter.restart` か要求の値を変えて出し直せる」と書いている (原文を読んだ)
+- 確かめたこと: Coil は回線が戻っても要求を出し直さない。このアプリが使う Coil 3.6.3 のソースを読んだ。回線の状態は要求を出すときに `ConnectivityChecker.isOnline()` で 1 回見るだけで
+  (`NetworkFetcher.kt` の `newRequest`)、回線の変化を見張る仕組み (`NetworkCallback`) はどこにも無い。出し直しの手段は `AsyncImagePainter.restart()` (手で呼ぶもの) だけ
+- (又聞き) coil-kt/coil #132 (2019 年から開いたまま) で、作者が「回線が戻っても要求を出し直さない」(2019-09-30)、
+  「足さない方に傾いている。使う側が回線の見張りを置き、`AsyncImagePainter.restart` か要求の値を変えて出し直せる」(2025-08-11) と書いている、とページを読ませたエージェントが報告した。
+  issue の原文は自分では読んでいない (この環境から GitHub の他のリポジトリの issue を取れない)
 - 確かめたこと: Coil の Compose の説明 (coil-kt.github.io/coil/compose/) には、`error` を渡さないときに何が出るかは書いていない
 - 確かめられなかったこと: Signal・Telegram が失敗した画像をどう出すか。検索では古い不具合の報告 (Signal の MMS の「tap to retry」、2017〜2018 年) しか出ず、今の版の動きは分からない。
   アプリのコードを読めば分かる見込み (次に #129 を直すときに読む)
