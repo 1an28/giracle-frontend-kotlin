@@ -271,5 +271,46 @@ class LiveServerTest {
         assertTrue("自分を削除できてしまう", runCatching { admin.api.deleteUser(adminId) }.isFailure)
     }
 
+    /**
+     * 古いファイルの削除 (DELETE server/delete-old-files、D-074): 指定より前の添付が消え、使用量が減る。
+     * 管理者でないと断られる。サーバー上の、それより前の添付はすべて消える (このテストより前に上げたものも)
+     */
+    @Test fun adminDeletesOldFiles() = runBlocking {
+        assumeTrue("GIRACLE_TEST_SERVER 未指定のためスキップ", server != null)
+        val suffix = System.currentTimeMillis().toString().takeLast(6)
+        val admin = client("admin-files")
+        admin.api.signIn(System.getenv("GIRACLE_TEST_ADMIN_USER") ?: "admin", System.getenv("GIRACLE_TEST_ADMIN_PASS") ?: "password123")
+        val ch = admin.api.createChannel("files$suffix", "古いファイルの削除").channelId
+        admin.api.joinChannel(ch)
+        try {
+            val bytes = "old file\n".repeat(512).toByteArray()
+            val fileId = admin.api.uploadFile(ch, UploadFile("old.txt", "text/plain", bytes.toRequestBody("text/plain".toMediaType())))
+            admin.api.send(ch, "添付つき", listOf(fileId), null)
+            val sent = eventually { admin.api.history(ch).history.firstOrNull { m -> m.files.any { it.id == fileId } } }
+            val before = admin.api.storageUsage()
+            assertTrue("上げたファイルが使用量に入っていない", before >= bytes.size)
+            // サーバーの記録は秒単位で切り捨てなので、上げた後の今を指定すれば必ず含まれる (同じ機械の時計)
+            val cutoff = java.time.Instant.now().plusSeconds(1)
+
+            // 管理者でない人は消せない
+            admin.api.createInvite("fil$suffix", 1)
+            val e = client("erin")
+            e.api.signUp("erin$suffix", "pass1234", "fil$suffix")
+            e.api.signIn("erin$suffix", "pass1234")
+            assertTrue("管理者でない人が削除できてしまう", runCatching { e.api.deleteOldFiles(cutoff) }.isFailure)
+            assertTrue(admin.api.history(ch).history.first { it.id == sent.id }.files.isNotEmpty())
+
+            assertEquals(false, admin.api.deleteOldFiles(cutoff))
+            val after = admin.api.storageUsage()
+            assertTrue("使用量が減っていない ($before → $after)", after <= before - bytes.size)
+            // メッセージは残り、添付だけが消える
+            val m = admin.api.history(ch).history.first { it.id == sent.id }
+            assertEquals("添付つき", m.content)
+            assertTrue("添付が残っている", m.files.isEmpty())
+        } finally {
+            runCatching { admin.api.deleteChannel(ch) }
+        }
+    }
+
     @Suppress("unused") private fun dummy(m: Message) = m
 }

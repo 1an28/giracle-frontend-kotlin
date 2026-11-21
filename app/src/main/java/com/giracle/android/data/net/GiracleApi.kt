@@ -114,6 +114,13 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
 
     suspend fun deleteCustomEmoji(code: String) = callUnit("DELETE", "server/custom-emoji/delete", obj("emojiCode" to code))
     suspend fun storageUsage(): Long = call("GET", "server/storage-usage")
+
+    /**
+     * [olderThan] 以前 (ちょうども含む) に上げられた添付ファイルを、ファイルと記録の両方とも消す (manageServer)。
+     * サーバーは ISO 8601 の文字列を受け付ける (LiveServerTest で確認)。まだ残っていれば true を返す
+     */
+    suspend fun deleteOldFiles(olderThan: java.time.Instant): Boolean =
+        call<DeleteOldFilesResult>("DELETE", "server/delete-old-files", obj("deleteOlderThan" to olderThan.toString())).hasMoreFiles
     suspend fun logs(targetDate: String, cursorLogId: String?): List<RequestLog> =
         call("GET", "server/log", query = mapOf("targetDate" to targetDate, "cursorLogId" to cursorLogId))
 
