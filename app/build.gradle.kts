@@ -22,8 +22,8 @@ android {
         applicationId = "io.github.u1an28.giracle.kotlin"
         minSdk = 26
         targetSdk = 37
-        versionCode = 18
-        versionName = "0.8.8"
+        versionCode = 19
+        versionName = "0.9.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
