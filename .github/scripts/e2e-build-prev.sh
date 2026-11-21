@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI 用: 上書き更新の確認 (D-075 の 3、D-080) の元にする前の版 (最新のリリースのタグ) の配布版 APK を作り、prev-apk/ に置く。
-# 今の版と同じジョブで作る (同じ debug 鍵で署名され、adb install -r で上書きできる)。e2e.yml が鍵と一緒にキャッシュする。
+# e2e.yml がタグごとにキャッシュする。署名は e2e-run.sh が今の版とそろえる。
 #   $1: タグ (例 v0.9.0)
 set -euo pipefail
 TAG=$1

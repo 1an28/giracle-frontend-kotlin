@@ -69,16 +69,40 @@ if [ -n "$PREV_APK" ] && [ -n "$LAN_SERVER" ]; then
   else
     UPGRADE_RUN=1
     PREV_TAG=$(cat "$(dirname "$PREV_APK")/tag" 2>/dev/null || echo "?")
+    # 2 つの APK を、このジョブで作った使い捨ての鍵で署名し直す (署名がそろわないと adb install -r が失敗する)。
+    # debug 鍵を前の版と一緒にキャッシュしたときは、戻した鍵でも今の版と署名が合わなかった (原因は確かめていない。D-080)。
+    # 手がかりとして、署名し直す前の証明書の指紋を出す
+    APKSIGNER=$(ls -d "$SDK"/build-tools/*/apksigner | sort -V | tail -1)
+    echo "署名し直す前の証明書: 前の版 $("$APKSIGNER" verify --print-certs "$PREV_APK" 2>/dev/null | grep -m1 SHA-256) / 今の版 $("$APKSIGNER" verify --print-certs "$APP_APK" 2>/dev/null | grep -m1 SHA-256)"
+    KS="${RUNNER_TEMP:-/tmp}/e2e-upgrade.keystore"
+    rm -f "$KS"
+    keytool -genkeypair -keystore "$KS" -storepass e2e-pass -keypass e2e-pass -alias e2e -keyalg RSA -keysize 2048 \
+      -validity 1 -dname "CN=e2e" > /dev/null 2>&1
+    PREV_SIGNED="$OUT/prev-signed.apk"
+    APP_SIGNED="$OUT/app-signed.apk"
+    if "$APKSIGNER" sign --ks "$KS" --ks-pass pass:e2e-pass --ks-key-alias e2e --out "$PREV_SIGNED" "$PREV_APK" &&
+       "$APKSIGNER" sign --ks "$KS" --ks-pass pass:e2e-pass --ks-key-alias e2e --out "$APP_SIGNED" "$APP_APK"; then
+      echo "上書き更新の確認用に、2 つの APK を同じ使い捨ての鍵で署名し直した"
+    else
+      echo "::error::上書き更新の確認用の署名し直しが失敗した"
+      UPGRADE_RUN=0
+    fi
+  fi
+  if [ $UPGRADE_RUN = 1 ]; then
     "$ADB" uninstall "$APP_PKG" > /dev/null 2>&1
     # 権限は付けずに入れる (通知の権限の確認画面が出ることも確かめるため)
-    "$ADB" install "$PREV_APK"
+    "$ADB" install "$PREV_SIGNED"
     echo "上書き更新の確認: 前の版 $PREV_TAG ($(app_version))"
     logcat_start "$OUT/logcat.txt" upgrade
     "$ADB" shell am instrument -w -e appPackage "$APP_PKG" -e server http://localhost:3333 -e lanServer "$LAN_SERVER" \
       -e upgradePhase before -e prevVersion "$PREV_TAG" -e class com.giracle.e2e.ReleaseAppTest#upgradeBefore \
       "$TEST_PKG/androidx.test.runner.AndroidJUnitRunner" 2>&1 | tee "$OUT/instrument-upgrade-before.txt"
-    if grep -q '^OK (' "$OUT/instrument-upgrade-before.txt"; then
-      "$ADB" install -r "$APP_APK"
+    if ! grep -q '^OK (' "$OUT/instrument-upgrade-before.txt"; then
+      echo "::error::上書き更新の確認の前半 (前の版の操作、upgradeBefore) が失敗した"
+    elif ! "$ADB" install -r "$APP_SIGNED"; then
+      # 入らなかったまま後半を動かすと、前の版のまま確かめて通ってしまう
+      echo "::error::今の版を前の版の上に入れられない (adb install -r)"
+    else
       echo "上書き更新の確認: 上書きした後 ($(app_version))"
       "$ADB" shell am instrument -w -e appPackage "$APP_PKG" -e server http://localhost:3333 -e lanServer "$LAN_SERVER" \
         -e upgradePhase after -e prevVersion "$PREV_TAG" -e class com.giracle.e2e.ReleaseAppTest#upgradeAfter \
@@ -89,7 +113,9 @@ if [ -n "$PREV_APK" ] && [ -n "$LAN_SERVER" ]; then
     logcat_stop "$OUT/logcat.txt" upgrade
   fi
 fi
-# 権限は付けずに入れる (通知の権限の確認画面が出ることも確かめるため)。上書き更新の確認の後なら、上書きしても変わらない
+# 上書き更新の確認で入れたものは鍵が違うので、消してから入れる。
+# 権限は付けずに入れる (通知の権限の確認画面が出ることも確かめるため)
+[ $UPGRADE_RUN = 1 ] && "$ADB" uninstall "$APP_PKG" > /dev/null 2>&1
 "$ADB" install -r "$APP_APK" || { echo "::error::確かめる APK を入れられない"; exit 1; }
 
 logcat_start "$OUT/logcat.txt" fast

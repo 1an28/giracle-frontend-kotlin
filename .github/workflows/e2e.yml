@@ -41,8 +41,8 @@ jobs:
           cache: gradle
       - name: Install SDK packages
         run: .github/scripts/sdk-install.sh
-      # 上書き更新の確認 (D-075 の 3、D-080): 前の版 = 最新のリリースのタグ。その APK と、署名した debug 鍵を一緒にキャッシュする
-      # (今の版も同じ鍵で署名しないと、adb install -r で上書きできない)。キャッシュに無ければ、このジョブで作る
+      # 上書き更新の確認 (D-075 の 3、D-080): 前の版 = 最新のリリースのタグ。その APK をタグごとにキャッシュし、無ければこのジョブで作る。
+      # 署名は e2e-run.sh が 2 つの APK を同じ使い捨ての鍵で署名し直してそろえる
       - name: Pick the previous release
         id: prev
         run: |
@@ -53,10 +53,8 @@ jobs:
         id: prev-cache
         uses: actions/cache/restore@v5
         with:
-          path: |
-            ~/.android/debug.keystore
-            prev-apk/
-          key: e2e-prev-${{ steps.prev.outputs.tag }}-v1
+          path: prev-apk/
+          key: e2e-prev-${{ steps.prev.outputs.tag }}-v2
       # 作れなくても止めない (ほかの確認は動かす)。e2e-run.sh が、前の版の APK が無いことを失敗にする
       - name: Build previous release APK
         if: steps.prev-cache.outputs.cache-hit != 'true'
@@ -67,10 +65,8 @@ jobs:
         if: steps.prev-cache.outputs.cache-hit != 'true' && hashFiles('prev-apk/app-release.apk') != ''
         uses: actions/cache/save@v5
         with:
-          path: |
-            ~/.android/debug.keystore
-            prev-apk/
-          key: e2e-prev-${{ steps.prev.outputs.tag }}-v1
+          path: prev-apk/
+          key: e2e-prev-${{ steps.prev.outputs.tag }}-v2
       # 配布版は debug 鍵で署名する (R8 の処理は本物の配布版と同じ。鍵は Secrets を使わない)
       - name: Build release APK and e2e APK
         run: ./gradlew :app:assembleRelease :e2e:assembleDebug
