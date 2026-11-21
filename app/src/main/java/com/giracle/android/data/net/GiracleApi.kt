@@ -50,7 +50,7 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
     }
 
     // 通信から解析までを 1 つの withContext で囲み、呼んだ側 (多くはメインスレッド) へ戻るのを終わりの 1 回にする。
-    // 別々に囲むと間で一度メインに戻り、メインが描画などで塞がっている間は解析が始まらない (D-068 の記録、D-074)。
+    // 別々に囲むと間で一度メインに戻り、メインが描画などで塞がっている間は解析が始まらない (D-068 の記録、D-075)。
     // 本文の読み出しは fetchString の中で IO に移り、終われば Default に戻る (メインは通らない)
     private suspend inline fun <reified T> call(method: String, path: String, body: JsonElement? = null, query: Map<String, Any?> = emptyMap()): T =
         withContext(Dispatchers.Default) {
@@ -216,7 +216,7 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
         callUnit("POST", "message/read-time/update", obj("channelId" to channelId, "readTime" to readTime))
 
     suspend fun send(channelId: String, text: String, fileIds: List<String>, replyingMessageId: String?): Message {
-        // 通信から解析までを 1 つの withContext で囲み、メインスレッドへ戻るのを終わりの 1 回にする (D-074)。
+        // 通信から解析までを 1 つの withContext で囲み、メインスレッドへ戻るのを終わりの 1 回にする (D-075)。
         // 以前は通信 (IO) と解析 (Default) を別々に囲んでいて、間でメインに戻っていた。押した直後はメインが描画で塞がりやすく、
         // その間解析が始まらなかった (D-068 の記録)。http_body は本文を読み終えた時点、parsed は解析を終えた時点で、どちらもメインに戻る前に記録する (#70)
         return withContext(Dispatchers.Default) {
@@ -256,7 +256,7 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
 
     /** ファイルをアップロードし、ファイル ID を返す */
     suspend fun uploadFile(channelId: String, file: UploadFile): String {
-        // call と同じく、通信から解析までを 1 つの withContext で囲む (D-074)
+        // call と同じく、通信から解析までを 1 つの withContext で囲む (D-075)
         return withContext(Dispatchers.Default) {
             val text = multipart("POST", "message/file/upload", mapOf("channelId" to channelId), "file", file)
             val root = AppJson.parseToJsonElement(text).jsonObject
