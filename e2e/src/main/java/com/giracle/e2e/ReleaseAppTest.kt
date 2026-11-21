@@ -16,7 +16,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestName
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.regex.Pattern
@@ -33,6 +35,8 @@ import java.util.regex.Pattern
  *               Android 17 のローカルネットワーク権限の確認 (#42) はこちらを使う
  *   uxServer / uxNet  よく使う作業の測定 (uxTasks) でアプリがつなぐサーバーと、ログに付ける回線の名前
  *               (既定 server / fast。e2e-run.sh が遅延の中継を通した遅い回線 (slow) でも測る。D-046)
+ *   upgradePhase  上書き更新の確認 (upgradeBefore / upgradeAfter、D-075 の 3) の段階 (before / after)。無ければその 2 つを飛ばす
+ *   prevVersion  上書きする前の版の名前 (ログに付けるだけ)
  *
  * 1 つの流れにしてあるのは、ログイン → チャンネル → 背面 → 設定 と、前の段階の状態を引き継ぐため。
  * 各段階の画面を [shots] に保存する (CI が取り出して成果物にする)。
@@ -50,8 +54,14 @@ class ReleaseAppTest {
     private val uxNet = args.getString("uxNet") ?: "fast"
     private val adminUser = args.getString("adminUser") ?: "admin"
     private val adminPass = args.getString("adminPass") ?: "password123"
+    private val upgradePhase = args.getString("upgradePhase")
+    private val prevVersion = args.getString("prevVersion") ?: "?"
     private val shots = File(instr.targetContext.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
-    private val suffix = System.currentTimeMillis().toString().takeLast(6)
+    private var suffix = System.currentTimeMillis().toString().takeLast(6)
+    /** 上書き更新の確認で、前の段階 (upgradeBefore) から引き継ぐもの (チャンネルと識別子)。確認用 APK は入れ直さないので、その中に置く */
+    private val upgradeState = File(instr.context.filesDir, "upgrade-state.txt")
+
+    @get:Rule val testName = TestName()
 
     private val admin = ServerApi(server)
     private val bob = ServerApi(server)
@@ -61,6 +71,17 @@ class ReleaseAppTest {
     @Before fun setUp() {
         // 前のテストが通知欄を開いたまま失敗しても、次のテストの画面を覆わないよう閉じる (巻き添えの失敗を防ぐ)
         runCatching { shell("cmd statusbar collapse"); device.pressHome() }
+        if (testName.methodName.startsWith("upgrade")) {
+            assumeTrue("upgradePhase の指定が無い", upgradePhase != null && lanServer != null)
+            if (testName.methodName == "upgradeAfter") {
+                // 前の段階で作ったチャンネルを使う (ここでは作らない)
+                admin.signIn(adminUser, adminPass)
+                val (id, sfx) = upgradeState.readText().trim().split(" ")
+                channelId = id
+                suffix = sfx
+                return
+            }
+        }
         // 管理者で招待コードを作り、相手役 (bob) を登録する。確認用のチャンネルを作り、2 人とも参加する
         admin.signIn(adminUser, adminPass)
         val invite = "e2e$suffix"
@@ -74,6 +95,8 @@ class ReleaseAppTest {
 
     @After fun tearDown() {
         shot("last")
+        // 上書き更新の確認の前半が通ったときは、後半 (upgradeAfter) が同じチャンネルを使うので消さない
+        if (testName.methodName == "upgradeBefore" && upgradeState.exists()) return
         runCatching { admin.deleteChannel(channelId) }
     }
 
@@ -252,25 +275,26 @@ class ReleaseAppTest {
      * 2. サーバーを指定してログイン
      * 3. 通知の権限の確認 (Android 13 以上)。許可しても落ちないこと
      */
-    private fun freshLogin(url: String = server) {
+    private fun freshLogin(url: String = server, prev: Boolean = false) {
+        fun r(tag: String) = if (prev) prevRes(tag) else res(tag)
         shell("pm clear $pkg")
         // LAN のアドレスのサーバーは、Android 17 以上ではローカルネットワークの権限が要る (#42)。確認画面は別のテストで確かめるので、先に許可しておく
         if ("localhost" !in url && android.os.Build.VERSION.SDK_INT >= 37) shell("pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK")
         launch()
-        val field = wait(res("login.server_url"), 30_000, "ログイン画面")
+        val field = wait(r("login.server_url"), 30_000, "ログイン画面")
         shot("launch")
         field.text = url
-        wait(res("login.connect"), 5_000, "接続ボタン").click()
-        wait(res("login.username"), 30_000, "サーバー情報の取得 (login.username)").text = adminUser
-        wait(res("login.password"), 5_000, "パスワード欄").text = adminPass
+        wait(r("login.connect"), 5_000, "接続ボタン").click()
+        wait(r("login.username"), 30_000, "サーバー情報の取得 (login.username)").text = adminUser
+        wait(r("login.password"), 5_000, "パスワード欄").text = adminPass
         hideKeyboard() // ボタンを隠さないように
-        wait(res("login.submit"), 5_000, "ログインボタン").click()
+        wait(r("login.submit"), 5_000, "ログインボタン").click()
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             if (device.wait(Until.findObject(ALLOW_BUTTON), 20_000) == null) fail("通知の権限の確認画面が出ない")
             shot("permission")
             if (!clickAllowSettled()) fail("通知の権限の確認画面を閉じられない")
         }
-        wait(res("screen.home"), 20_000, "ホーム画面")
+        wait(r("screen.home"), 20_000, "ホーム画面")
         assertAlive("通知の権限を許可した後")
         shot("home")
     }
@@ -694,6 +718,159 @@ class ReleaseAppTest {
         Log.i(TAG, "E2E-RESULT offline_start_test=done sdk=${android.os.Build.VERSION.SDK_INT}")
     }
 
+    /**
+     * 上書き更新で失わない (D-075 の 3、D-080) の前半。前の版 (e2e-run.sh が入れる) で次の状態を作る:
+     * ログイン (LAN のサーバー。電波を切る確認に使うため) → 設定を 1 つ変える → 圏外で送って送信待ちを作る → 下書きを書く。
+     * 圏外のまま終える (後半で、電波が無いまま起動しても残っているかを見てから、電波を戻す)。
+     * 前の版の画面は前の版の testTag・文字で操作する ([prevRes]・[prevText])。
+     */
+    @Test fun upgradeBefore() {
+        assumeTrue("upgradePhase=before ではない", upgradePhase == "before")
+        upgradeState.delete()
+        var ok = false
+        try {
+            freshLogin(lanServer!!, prev = true)
+            // 設定: 「送る写真を縮小する」を切り替える (切り替えた後の値を後半で見る)
+            wait(prevRes("home.settings"), 5_000, "設定ボタン (前の版)").click()
+            wait(prevRes("screen.settings"), 10_000, "設定画面 (前の版)")
+            wait(prevText(SETTING_TAB), 5_000, "チャットのタブ (前の版)").click()
+            val sw = switchFor(prevText(SETTING_LABEL), "写真の縮小の設定 (前の版)")
+            val after = !sw.isChecked
+            sw.click()
+            waitFor("写真の縮小の設定が切り替わる (前の版)") { switchFor(prevText(SETTING_LABEL), "写真の縮小の設定").isChecked == after }
+            device.pressBack()
+            findScrolling(prevRes("home.channel:$channelId"), "確認用チャンネル (前の版)").click()
+            wait(prevRes("screen.channel"), 10_000, "チャンネル画面 (前の版)")
+            // 送信待ち: 圏外で送る
+            val queued = "更新前の送信待ち $suffix"
+            shell("cmd connectivity airplane-mode enable")
+            SystemClock.sleep(3_000)
+            wait(prevRes("composer.input"), 10_000, "入力欄 (前の版)").apply { click(); text = queued }
+            waitSendButtonSettled("送信ボタン (前の版)", prevRes("composer.send")).click()
+            wait(prevRes("composer.outbox"), 30_000, "送信待ちの表示 (前の版)")
+            // 下書き: 送らずに残す
+            val draft = "更新前の下書き $suffix"
+            wait(prevRes("composer.input"), 10_000, "入力欄 (前の版。下書き)").apply { click(); text = draft }
+            SystemClock.sleep(1_500) // 下書きは手が止まって 0.5 秒後に保存される
+            hideKeyboard()
+            device.pressHome() // 画面を離れて、保存を書き切らせる
+            SystemClock.sleep(3_000)
+            assertTrue("電波が無いのにサーバーに届いている (前の版)", admin.recentTexts(channelId).none { it == queued })
+            shot("upgrade_before")
+            upgradeState.writeText("$channelId $suffix ${if (after) 1 else 0}")
+            Log.i(TAG, "E2E-RESULT upgrade_before=done from=$prevVersion setting_after=$after sdk=${android.os.Build.VERSION.SDK_INT}")
+            ok = true
+        } finally {
+            // 失敗したときは電波を戻しておく (後の確認を巻き添えにしない)。通ったときは圏外のまま後半へ渡す
+            if (!ok) shell("cmd connectivity airplane-mode disable")
+        }
+    }
+
+    /**
+     * 上書き更新で失わない (D-075 の 3、D-080) の後半。新しい版を上書きした後 (e2e-run.sh が adb install -r)、圏外のまま起動して、
+     * ログインし直しが要らないこと・設定・下書き・送信待ちが残っていることを見る。電波を戻し、送信待ちが 1 件だけ届くことを見る。
+     * 結果は「E2E-RESULT upgrade ...」の行。
+     */
+    @Test fun upgradeAfter() {
+        assumeTrue("upgradePhase=after ではない", upgradePhase == "after")
+        val settingAfter = upgradeState.readText().trim().split(" ")[2] == "1"
+        val queued = "更新前の送信待ち $suffix"
+        val draft = "更新前の下書き $suffix"
+        var loginKept = false
+        var settingKept = false
+        var draftKept = false
+        var outboxShown = false
+        var channelOffline = false
+        var delivered = 0
+        try {
+            launch()
+            // ログインし直しが要らない: ログイン後の画面が出て、ログイン画面が出ない。
+            // 前回開いていた画面に戻るので、ホームとは限らない (前回のチャンネル画面に戻ることがある)
+            val first = waitDismissingSystemDialogs(By.res(Pattern.compile("screen\\.(home|channel)")), 30_000)
+            loginKept = first != null && device.findObject(res("login.server_url")) == null
+            shot("upgrade_launch")
+            if (!loginKept) dumpUi("上書き後の起動でログイン後の画面が出ない")
+            if (loginKept) {
+                var channelChecked = false
+                // チャンネルの下書きと送信待ちの表示を見る (圏外のまま)
+                fun checkChannel() {
+                    draftKept = pollUntil(5_000) { device.findObject(res("composer.input"))?.text?.contains(draft) == true }
+                    if (channelOffline) {
+                        outboxShown = device.wait(Until.findObject(res("composer.outbox")), 10_000) != null
+                        assertTrue("電波が無いのにサーバーに届いている (上書き後)", admin.recentTexts(channelId).none { it == queued })
+                    }
+                    shot("upgrade_channel")
+                    channelChecked = true
+                }
+                if (device.findObject(res("screen.channel")) != null) {
+                    // 前回の確認用チャンネルに戻った (ほかのチャンネルを開く手順は無いので、このチャンネルのはず)
+                    channelOffline = true
+                    checkChannel()
+                    hideKeyboard()
+                    device.pressBack()
+                }
+                wait(res("screen.home"), 10_000, "ホーム画面")
+                wait(res("home.settings"), 5_000, "設定ボタン").click()
+                wait(res("screen.settings"), 10_000, "設定画面")
+                wait(By.text(SETTING_TAB), 5_000, "チャットのタブ").click()
+                settingKept = switchFor(By.text(SETTING_LABEL), "写真の縮小の設定").isChecked == settingAfter
+                shot("upgrade_setting")
+                device.pressBack()
+                wait(res("screen.home"), 10_000, "ホーム画面に戻る")
+                if (!channelChecked) {
+                    // 前回の内容は圏外でも出るはず (P-2) だが、この確認の対象ではない。出なければ記録して電波を戻してから開く
+                    device.wait(Until.findObject(res("home.channel:$channelId")), 15_000)
+                    channelOffline = runCatching { findScrolling(res("home.channel:$channelId"), "確認用チャンネル (圏外)") }.isSuccess
+                    if (!channelOffline) shell("cmd connectivity airplane-mode disable")
+                    findScrolling(res("home.channel:$channelId"), "確認用チャンネル").click()
+                    wait(res("screen.channel"), 10_000, "チャンネル画面")
+                    checkChannel()
+                }
+            }
+        } finally {
+            shell("cmd connectivity airplane-mode disable")
+        }
+        // つながったら送信待ちが送られる (ログインとサーバー URL が残っていることの確かめにもなる)。1 件だけ
+        if (pollUntil(90_000) { admin.recentTexts(channelId).contains(queued) }) {
+            SystemClock.sleep(3_000)
+            delivered = admin.recentTexts(channelId).count { it == queued }
+        }
+        Log.i(
+            TAG,
+            "E2E-RESULT upgrade from=$prevVersion login_kept=$loginKept setting_kept=$settingKept draft_kept=$draftKept " +
+                "outbox_shown=$outboxShown channel_offline=$channelOffline delivered=$delivered sdk=${android.os.Build.VERSION.SDK_INT}",
+        )
+        if (delivered == 0) shot("upgrade_not_delivered")
+        assertAlive("上書き後")
+        assertTrue("上書きした後、ログインし直しが要る (ログイン後の画面が出ない)", loginKept)
+        assertTrue("上書きした後、設定 ($SETTING_LABEL) が残っていない", settingKept)
+        assertTrue("上書きした後、下書きが残っていない", draftKept)
+        // 圏外でチャンネルを開けなかったときは、表示は見られないが、届いた件数で残っていたことを確かめる
+        assertTrue("上書きした後、送信待ちの表示が無い", outboxShown || !channelOffline)
+        assertTrue("上書きした後、送信待ちが $delivered 件届いた (1 件のはず)", delivered == 1)
+        Log.i(TAG, "E2E-RESULT upgrade_test=done sdk=${android.os.Build.VERSION.SDK_INT}")
+    }
+
+    /**
+     * 前の版の画面の要素。testTag を変えた (名前を変えた・消した) ときは、前の版が出ている間 (次のリリースまで)、
+     * [RENAMED_SINCE_PREV] に「今の名前 → 前の版の名前」を足す。足し忘れると、変えた PR の e2e の upgradeBefore が失敗して気付ける
+     */
+    private fun prevRes(tag: String): BySelector = By.res(RENAMED_SINCE_PREV[tag] ?: tag)
+
+    /** 前の版の画面の文字 ([prevRes] と同じ考え) */
+    private fun prevText(text: String): BySelector = By.text(RENAMED_SINCE_PREV[text] ?: text)
+
+    /** 設定の 1 行 (文字 [label]) のスイッチ。文字から親へたどって、同じ行のスイッチを探す (設定の行には testTag が無い) */
+    private fun switchFor(label: BySelector, what: String): UiObject2 {
+        var o: UiObject2? = wait(label, 5_000, what)
+        repeat(4) {
+            o = o?.parent ?: return@repeat
+            o?.findObject(By.checkable(true))?.let { return it }
+        }
+        dumpUi("「$what」のスイッチが見つからない")
+        fail("「$what」のスイッチが見つからない"); error("unreachable")
+    }
+
     /** 共有するファイル (64x64 の PNG と、短い文書) をキャッシュの share/ に作る */
     private fun writeShareFiles(png: String, txt: String) {
         val dir = File(instr.context.cacheDir, "share").apply { mkdirs() }
@@ -847,22 +1024,22 @@ class ReleaseAppTest {
      * 入力欄に文字が足されたことがあった (2026-11-21 の main の e2e。推測)。
      * キーボードが出ていて、ボタンの位置が 2 回続けて同じなら落ち着いたとみる。5 秒で落ち着かなくても押す (押し損ねは呼ぶ側が記録する)
      */
-    private fun waitSendButtonSettled(what: String): UiObject2 {
-        wait(res("composer.send"), 5_000, what)
+    private fun waitSendButtonSettled(what: String, send: BySelector = res("composer.send")): UiObject2 {
+        wait(send, 5_000, what)
         val t0 = SystemClock.uptimeMillis()
         var last: android.graphics.Rect? = null
         var same = 0
         var ime = false
         while (SystemClock.uptimeMillis() - t0 < 5_000) {
             ime = imeShown()
-            val b = device.findObject(res("composer.send"))?.visibleBounds
+            val b = device.findObject(send)?.visibleBounds
             same = if (ime && b != null && b == last) same + 1 else 0
             if (same >= 2) break
             last = b
             SystemClock.sleep(250)
         }
         Log.i(TAG, "E2E-RESULT send_tap_settle ms=${SystemClock.uptimeMillis() - t0} ime_shown=$ime settled=${same >= 2} bounds=$last")
-        return wait(res("composer.send"), 5_000, what)
+        return wait(send, 5_000, what)
     }
 
     private fun imeShown(): Boolean = shell("dumpsys input_method").contains("mInputShown=true")
@@ -928,5 +1105,13 @@ class ReleaseAppTest {
         private val ALLOW_BUTTON: BySelector = By.res(Pattern.compile(".*:id/permission_allow_button"))
         /** 読み込みに失敗したときの画面全体の表示 (ui/Root.kt の LoadError) */
         private const val LOAD_ERROR_TEXT = "サーバーから読み込めませんでした"
+        /** 上書き更新の確認で変える設定 (設定のチャットのタブの最初の行) */
+        private const val SETTING_TAB = "チャット"
+        private const val SETTING_LABEL = "送る写真を縮小する"
+        /**
+         * 前の版から名前を変えた testTag・文字 (今の名前 → 前の版の名前)。上書き更新の確認の前半 (前の版を操作する) だけが使う。
+         * 前の版 (e2e が上書きの元にする最新のリリース、D-080) が今の名前になったら消してよい
+         */
+        private val RENAMED_SINCE_PREV: Map<String, String> = emptyMap()
     }
 }

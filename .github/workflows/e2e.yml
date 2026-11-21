@@ -30,7 +30,7 @@ jobs:
         api: ["35", "37.0"]
     name: e2e (API ${{ matrix.api }})
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -41,6 +41,32 @@ jobs:
           cache: gradle
       - name: Install SDK packages
         run: .github/scripts/sdk-install.sh
+      # 上書き更新の確認 (D-075 の 3、D-080): 前の版 = 最新のリリースのタグ。その APK をタグごとにキャッシュし、無ければこのジョブで作る。
+      # 署名は e2e-run.sh が 2 つの APK を同じ使い捨ての鍵で署名し直してそろえる
+      - name: Pick the previous release
+        id: prev
+        run: |
+          tag=$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          echo "前の版: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Restore previous release APK
+        id: prev-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: prev-apk/
+          key: e2e-prev-${{ steps.prev.outputs.tag }}-v2
+      # 作れなくても止めない (ほかの確認は動かす)。e2e-run.sh が、前の版の APK が無いことを失敗にする
+      - name: Build previous release APK
+        if: steps.prev-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: .github/scripts/e2e-build-prev.sh "${{ steps.prev.outputs.tag }}"
+      # e2e が失敗しても残す (actions/cache の後片付けは、ジョブが通ったときしか保存しない)
+      - name: Save previous release APK
+        if: steps.prev-cache.outputs.cache-hit != 'true' && hashFiles('prev-apk/app-release.apk') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: prev-apk/
+          key: e2e-prev-${{ steps.prev.outputs.tag }}-v2
       # 配布版は debug 鍵で署名する (R8 の処理は本物の配布版と同じ。鍵は Secrets を使わない)
       - name: Build release APK and e2e APK
         run: ./gradlew :app:assembleRelease :e2e:assembleDebug
@@ -51,7 +77,9 @@ jobs:
           API: ${{ matrix.api }}
         run: .github/scripts/emulator-start.sh
       - name: Run e2e
-        timeout-minutes: 15
+        timeout-minutes: 20
+        env:
+          PREV_APK: prev-apk/app-release.apk
         run: .github/scripts/e2e-run.sh
       - uses: actions/upload-artifact@v7
         if: always()
