@@ -218,15 +218,17 @@
 - 確かめたこと (Signal-Android `8959dc6`、2026-11-20 の main を読んだ): 添付の取得の状態ごとに、画像の上の操作を変えている
   (`components/transfercontrols/TransferControls.kt`)。取得に失敗した (`TRANSFER_PROGRESS_FAILED`) ものは「RETRY_DOWNLOADING」で、
   矢印のアイコンと隅に「Retry」(`NetworkFailure__retry`) を出し、押すと取り直す (`TransferControlsContent.kt`)。
-  もう取れないもの (`TRANSFER_PROGRESS_PERMANENT_FAILURE`) には取り直しを出さない
+  もう取れないもの (`TRANSFER_PROGRESS_PERMANENT_FAILURE`) には、操作の部品そのものを出さない (呼び出し側の `components/ThumbnailView.java` の `controlsNeeded` が外す)
 - 確かめたこと: Giracle の backend は、添付の行が無いファイルに 404 "File not found" を返す (`message.service.ts` の GetFile)
 - 推測: 「取り直せる失敗」と「もう取れない」を分けて出すのが、このアプリでも合う。#129 の子セッションにこの方針で渡した
 
-### Element X は、何が揃ってから利用者を新しいアプリへ移したか (D-075)
+### Element X は、何が揃ってから利用者を新しいアプリへ移すつもりか (D-075)
 - 入り口: ROADMAP の「1.0 を出す条件を世の中の例から決める」。D-061 で読んだ Element X の続きで、正式な公開の前後に何を条件にしたかを見た
 - 確かめたこと (element.io「Element X and Pro updates; a glimpse into the future」、2025 の Matrix Conference の後の記事。2026-11-21 に原文を読んだ):
   速さと新しい体験のために「excellent but incomplete」のまま出し、旧アプリ (Element Classic と改名) を残した。
-  Spaces と Threads を「both being blockers preventing active user migration」とし、揃ってから移行を呼びかけ、旧アプリの終了日を告げる、という順
-- 推測: このアプリにそのまま当てはまるのは「多くの人が頼る機能が揃っていること」まで。Element X は旧アプリの置き換えで、このアプリは Web 版と並んで使われる点が違う。
+  Spaces と Threads を「both being blockers preventing active user migration」とした。これからの予定として、機能が揃い (「soon Element X will have parity」)、
+  同じ端末で旧アプリを使っている人が Element X にサインインするときの端末の確認を簡単にした後に、移行を呼びかけ、旧アプリの終了日を告げる、と書いている。
+  記事の時点では移行は済んでおらず、実際に移したかはこの記事からは分からない
+- 推測: このアプリに当てはまるのは「多くの人が頼る機能が揃っていること」と、移る人の手間や失うものを減らすこと (端末の確認の段階)。Element X は旧アプリの置き換えで、このアプリは Web 版と並んで使われる点が違う。
   安定の基準 (落ちる率など) があったかは、この記事からは分からない
 - 次: D-075 で 1.0 の条件を仮に決めた。安定と更新の条件は、Element X からではなく自分の判断として分けて書いた
