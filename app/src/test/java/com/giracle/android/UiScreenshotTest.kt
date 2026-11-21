@@ -246,6 +246,33 @@ class UiScreenshotTest {
         waitGone(TestTags.IMAGE_VIEWER)
     }
 
+    /**
+     * 管理者が古い添付を消した後に、端末に残った一覧から画像を開くと、全画面表示に「ファイルがサーバーにありません」を出す
+     * (サーバーは 404 を返す。出し直しの印は出さない。#129、D-076)
+     */
+    @Test fun imageGoneFromServer() {
+        assumeTrue(server != null)
+        val ch = newChannel("gone")
+        sendImage(ch, "サーバーから消される画像")
+        // Coil の読み込み役は JVM の中で 1 つだけで、前のテストのアプリ (の OkHttp の保存) を握ったままなので、作り直させる
+        @OptIn(coil3.annotation.DelicateCoilApi::class) coil3.SingletonImageLoader.reset()
+
+        startApp()
+        click(TestTags.homeChannel(ch))
+        val img = SemanticsMatcher("画像") { n -> n.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("channel.image") == true }
+        waitFor(img)
+        // 今より古い添付をサーバーからすべて消す (管理者の操作。このテストのチャンネルの画像も消える)
+        runBlocking { fixture.deleteOldFiles(java.time.Instant.now().plusSeconds(1)) }
+        // 端末の画像の保存 (Coil と OkHttp の両方) も消して、全画面表示でサーバーに取りに行かせる
+        coil3.SingletonImageLoader.get(ApplicationProvider.getApplicationContext()).let { it.memoryCache?.clear(); it.diskCache?.clear() }
+        ApplicationProvider.getApplicationContext<GiracleApp>().graph.http.cache?.evictAll()
+        rule.onAllNodes(img)[0].performClick()
+        waitTag(TestTags.IMAGE_VIEWER)
+        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TestTags.IMAGE_GONE), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodes(hasTestTag(TestTags.IMAGE_RETRY), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        shot("10b_image_gone")
+    }
+
     /** メッセージを右へすべらせると返信になる (D-043) */
     @Test fun swipeToReply() {
         assumeTrue(server != null)
