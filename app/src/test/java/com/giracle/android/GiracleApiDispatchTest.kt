@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 
 /**
- * GiracleApi の呼び出しが、呼んだ側のディスパッチャ (アプリではメインスレッド) に戻るのが終わりの 1 回だけであること (D-075)。
+ * GiracleApi の呼び出しが、呼んだ側のディスパッチャ (アプリではメインスレッド) に戻るのが終わりの 1 回だけであること (D-076)。
  * 以前は通信と解析を別々の withContext で囲んでいて、間で呼んだ側に戻っていた。呼んだ側が塞がっている間は解析が始まらなかった (D-068 の記録)
  */
 @RunWith(RobolectricTestRunner::class)
