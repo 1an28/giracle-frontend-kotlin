@@ -260,7 +260,8 @@ private fun ChannelRow(c: Channel, unread: Boolean, muted: Boolean, reorder: Boo
             IconButton(onClick = { onMove(1) }) { Icon(Icons.Default.KeyboardArrowDown, "下へ") }
             Icon(
                 AppIcons.DragUpDown, "引いて並べ替え",
-                Modifier.testTag(TestTags.homeChannelDrag(c.id)).size(40.dp).padding(8.dp).pointerInput(c.id) {
+                // 指が反応する範囲は 48dp、見た目のアイコンは 24dp (H-4)。pointerInput を padding より前に置き、余白も反応させる
+                Modifier.testTag(TestTags.homeChannelDrag(c.id)).size(48.dp).pointerInput(c.id) {
                     detectDragGestures(
                         onDragEnd = { drag = 0f },
                         onDragCancel = { drag = 0f },
@@ -273,7 +274,7 @@ private fun ChannelRow(c: Channel, unread: Boolean, muted: Boolean, reorder: Boo
                         if (drag > rowHeight / 2f) { if (move(1)) drag -= rowHeight else drag = rowHeight / 2f }
                         else if (drag < -rowHeight / 2f) { if (move(-1)) drag += rowHeight else drag = -rowHeight / 2f }
                     }
-                },
+                }.padding(12.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
