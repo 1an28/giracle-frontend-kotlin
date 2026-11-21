@@ -31,6 +31,7 @@ object TestTags {
     const val SCREEN_CHANNEL_BROWSER = "screen.channel_browser"
     const val SCREEN_SETTINGS = "screen.settings"
     const val SCREEN_MANAGE_SERVER = "screen.manage_server"
+    const val MANAGE_DELETE_OLD_FILES = "manage.delete_old_files"
 
     // ログイン
     const val LOGIN_SERVER_URL = "login.server_url"
