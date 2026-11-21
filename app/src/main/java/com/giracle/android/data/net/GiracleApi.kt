@@ -49,15 +49,17 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
         return client.fetchString(req)
     }
 
-    private suspend inline fun <reified T> call(method: String, path: String, body: JsonElement? = null, query: Map<String, Any?> = emptyMap()): T {
-        val text = raw(method, path, body, query)
-        return withContext(Dispatchers.Default) {
+    // 通信から解析までを 1 つの withContext で囲み、呼んだ側 (多くはメインスレッド) へ戻るのを終わりの 1 回にする。
+    // 別々に囲むと間で一度メインに戻り、メインが描画などで塞がっている間は解析が始まらない (D-068 の記録、D-078)。
+    // 本文の読み出しは fetchString の中で IO に移り、終われば Default に戻る (メインは通らない)
+    private suspend inline fun <reified T> call(method: String, path: String, body: JsonElement? = null, query: Map<String, Any?> = emptyMap()): T =
+        withContext(Dispatchers.Default) {
+            val text = raw(method, path, body, query)
             AppJson.decodeFromString(ApiResponse.serializer(serializer<T>()), text).data
         }
-    }
 
     private suspend fun callUnit(method: String, path: String, body: JsonElement? = null) {
-        raw(method, path, body)
+        withContext(Dispatchers.Default) { raw(method, path, body) }
     }
 
     private suspend fun multipart(method: String, path: String, fields: Map<String, String>, fileField: String, file: UploadFile): String {
@@ -214,13 +216,12 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
         callUnit("POST", "message/read-time/update", obj("channelId" to channelId, "readTime" to readTime))
 
     suspend fun send(channelId: String, text: String, fileIds: List<String>, replyingMessageId: String?): Message {
-        // 応答の本文を読み終えた時点を、メインスレッドに戻る前 (IO のスレッド) で記録する。通信と、戻るまでの待ちを分ける (#70)。
-        // IO の中で呼ぶと、応答を待った後の続きも IO で動く (呼んだ側がメインだと、本文を読む前後で 2 回メインに戻る)
-        val res = withContext(Dispatchers.IO) {
-            raw("POST", "message/send", obj("channelId" to channelId, "message" to text, "fileIds" to fileIds, "replyingMessageId" to replyingMessageId))
-                .also { com.giracle.android.data.SendTrace.mark("http_body") }
-        }
+        // 通信から解析までを 1 つの withContext で囲み、メインスレッドへ戻るのを終わりの 1 回にする (D-078)。
+        // 以前は通信 (IO) と解析 (Default) を別々に囲んでいて、間でメインに戻っていた。押した直後はメインが描画で塞がりやすく、
+        // その間解析が始まらなかった (D-068 の記録)。http_body は本文を読み終えた時点、parsed は解析を終えた時点で、どちらもメインに戻る前に記録する (#70)
         return withContext(Dispatchers.Default) {
+            val res = raw("POST", "message/send", obj("channelId" to channelId, "message" to text, "fileIds" to fileIds, "replyingMessageId" to replyingMessageId))
+                .also { com.giracle.android.data.SendTrace.mark("http_body") }
             AppJson.decodeFromString(ApiResponse.serializer(Message.serializer()), res).data
                 .also { com.giracle.android.data.SendTrace.mark("parsed") }
         }
@@ -255,8 +256,9 @@ class GiracleApi(private val client: OkHttpClient, @Volatile var endpoint: Endpo
 
     /** ファイルをアップロードし、ファイル ID を返す */
     suspend fun uploadFile(channelId: String, file: UploadFile): String {
-        val text = multipart("POST", "message/file/upload", mapOf("channelId" to channelId), "file", file)
+        // call と同じく、通信から解析までを 1 つの withContext で囲む (D-078)
         return withContext(Dispatchers.Default) {
+            val text = multipart("POST", "message/file/upload", mapOf("channelId" to channelId), "file", file)
             val root = AppJson.parseToJsonElement(text).jsonObject
             root["data"]!!.jsonObject["fileId"]!!.jsonObject["id"]!!.jsonPrimitive.content
         }

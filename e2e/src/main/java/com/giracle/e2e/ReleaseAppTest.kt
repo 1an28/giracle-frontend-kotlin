@@ -441,6 +441,7 @@ class ReleaseAppTest {
      * - http_body: 送信の HTTP の応答の本文を IO で読み終えた (通信の終わり)。parsed: 解析が終わった (Default)。
      *   main: 呼んだ側 (メインスレッド) に戻った。http: 一覧に足した後、画面に送信の終わりを知らせる直前。ws: WebSocket で自分の送信が届いた。in_list: 画面の一覧に載り、送る動きを始めた
      * - scroll: 送る動きの終わり (cancelled は取り消された時刻)。frame: その次の描画。found: e2e が見つけた
+     * - row_local: 仮のもの (D-071) の行を初めて組み立てた。effect_start: 送ったものへ動かす効果が最初に動いた (どちらも D-078。2 回目以降は GiraclePerf の行を見る)
      */
     private fun logSendBreakdown(task: UxTask) {
         val t0 = task.lastAt
@@ -467,7 +468,8 @@ class ReleaseAppTest {
         fun at(p: String) = phases[p]?.let { it - t0 } ?: -1
         Log.i(TAG, "E2E-RESULT ux net=$uxNet task=reply_breakdown input=${at("tap")} click=${task.lastClickMs} " +
             "http_body=${at("http_body")} parsed=${at("parsed")} main=${at("main_resumed")} http=${at("http_done")} ws=${at("ws_arrived")} in_list=${at("in_list")} scroll=${at("scroll_done")} " +
-            "cancelled=${at("scroll_cancelled")} frame=${at("frame")} found=${task.foundAt - t0}")
+            "cancelled=${at("scroll_cancelled")} frame=${at("frame")} found=${task.foundAt - t0} " +
+            "row_local=${at("row_local")} effect_start=${at("effect_start")}")
         Log.i(TAG, "E2E-RESULT ux net=$uxNet task=reply_detail in_list=[${detail["in_list"]}] " +
             "scroll=[${detail["scroll_done"] ?: detail["scroll_cancelled"]}] frame=[${detail["frame"]}]")
     }

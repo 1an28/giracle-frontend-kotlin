@@ -284,6 +284,8 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
         // 仮のもの (D-071) が、動かす前に本物へ置き換わっていたら、本物を探す
         val id = sentId?.let(store::resolveSent) ?: return@LaunchedEffect
         val i = history.messages.indexOfFirst { it.id == id }
+        // 効果が動いた時刻と、そのとき送ったものが一覧にあったか。置き換えで効果がやり直しになっているかを見分ける (D-078)
+        SendTrace.mark("effect_start", "id=$id v=${history.version} index=$i")
         if (i < 0) return@LaunchedEffect
         sentId = null
         // 一覧の先頭に「新しい側を読み込み中」の行があると、位置が 1 つずれる
@@ -388,6 +390,8 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
                     LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().testTag(TestTags.CHANNEL_MESSAGES)) {
                         if (!history.atEnd) item(key = "newer", contentType = "loader") { Loader() }
                         itemsIndexed(messages, key = { _, m -> m.id }, contentType = { _, m -> if (m.isSystemMessage) "sys" else "msg" }) { i, m ->
+                            // 仮のもの (D-071) の行を初めて組み立てた時刻。送信の続きより後に回っているかを見る (D-078)
+                            if (m.pending) remember(m.id) { SendTrace.mark("row_local", "id=${m.id}") }
                             val older = messages.getOrNull(i + 1)
                             val newer = messages.getOrNull(i - 1)
                             // 新着線: この行が既読最後で、より新しい行がある
