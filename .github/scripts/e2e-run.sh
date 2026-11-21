@@ -108,11 +108,13 @@ show_clues() {
     echo "::endgroup::"
   fi
   # 送信待ち・接続・再同期の記録 (#101)。上の 2 つは最後の行だけなので、前半のテストの記録が押し出される。タグで絞って全部出す
-  echo "::group::送信待ち・接続・再同期 (Outbox・GiracleWs・GiracleSync・GiracleNav)"
-  grep -E " (Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan)" "$OUT/logcat.txt" | tail -n 300
+  # 送信の経路 (GiracleSend、#94) も、どこまで進んだかを追えるよう同じところに出す
+  echo "::group::送信・送信待ち・接続・再同期 (GiracleSend・Outbox・GiracleWs・GiracleSync・GiracleNav)"
+  grep -E " (GiracleSend|Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan|send)" "$OUT/logcat.txt" | tail -n 400
   echo "::endgroup::"
   echo "::group::プッシュ通知の受信 (UnifiedPush・Play 開発者サービス)"
-  grep -E "GiraclePush|UnifiedPush|UP-|FirebaseReceiver|GCM|FCM" "$OUT/logcat.txt" | tail -n 80
+  # Couldn't register / Missing registration id: 組み込みの配信が Play 開発者サービスから受けた失敗の理由 (タグは R8 で短くなる。#93)
+  grep -E "GiraclePush|UnifiedPush|UP-|FirebaseReceiver|GCM|FCM|Couldn't register|Missing registration id" "$OUT/logcat.txt" | tail -n 80
   echo "::endgroup::"
   echo "::group::crash バッファ"; cat "$OUT/crash.txt"; echo "::endgroup::"
   # 終了時点の画面の要素 (resource-id・文字・クラス) の一覧
@@ -130,6 +132,10 @@ if ! grep -q '^OK (' "$OUT/instrument-slow.txt"; then
   tail -n 40 "$OUT/instrument-slow.txt"
   status=1
 fi
+# プッシュ通知の登録の経過 (#93)。通ったときも出す: Play 開発者サービスの準備 (GCM-GMS) が遅れた回に、アプリのやり直しで有効になったかを読むため
+echo "::group::プッシュ通知の登録の経過 (GiraclePush・GCM-GMS・失敗の理由)"
+grep -E " (GiraclePush|GCM-GMS) *: |Missing registration id|E2E-RESULT push " "$OUT/logcat.txt" | tail -n 60
+echo "::endgroup::"
 # 条件付きの確認 (assume) は、飛ばされても「OK」になる。指定したのに動いていなければ失敗にする
 echo "::group::e2e の結果の印"; grep -o "E2E-RESULT .*" "$OUT/logcat.txt"; echo "::endgroup::"
 # よく使う作業の手数と時間 (D-046)。エミュレータの時間は絶対値ではなく、前の実行 (docs/UI_PRINCIPLES.md 9 章の基準) との比較に使う
@@ -167,6 +173,10 @@ fi
 if [ $status = 0 ] && [ -n "$LAN_SERVER" ] && ! grep -q "E2E-RESULT offline_start_test=done" "$OUT/logcat.txt"; then
   echo "::error::電波が無いときの起動の確認 (offlineColdStart) が最後まで動いていない (飛ばされた?)"
   status=1
+fi
+# 送信がサーバーで見つからなかった回の、その後の行方 (#94)。遅れて届いたか・本文が違うものが届いたか・無いままか
+if grep -q "E2E-RESULT send_server" "$OUT/logcat.txt"; then
+  echo "::warning::送信がサーバーで見つからなかった (#94)。$(grep -oE 'E2E-RESULT send_server .*' "$OUT/logcat.txt" | head -1)"
 fi
 # 送信ボタンを押し直した回 (#94)。通っても見えるように警告にする
 if grep -q "E2E-RESULT send_tap_retry" "$OUT/logcat.txt"; then
