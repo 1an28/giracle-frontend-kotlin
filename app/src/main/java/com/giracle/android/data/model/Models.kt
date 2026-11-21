@@ -238,6 +238,10 @@ data class RequestLogCount(
     val otherCount: Int = 0,
 )
 
+/** DELETE server/delete-old-files の応答。1 回の上限 (500 件 × 10 回) に達すると hasMoreFiles = true */
+@Serializable
+data class DeleteOldFilesResult(val hasMoreFiles: Boolean = false)
+
 @Serializable
 data class LogGroupResult(
     val group: List<RequestLogCount> = emptyList(),

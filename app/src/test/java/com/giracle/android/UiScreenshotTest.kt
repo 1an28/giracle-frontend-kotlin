@@ -309,8 +309,13 @@ class UiScreenshotTest {
         // つまみは行 (押せる要素) の中にまとめられるので、まとめる前の木で探す
         rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TestTags.homeChannelDrag(a)), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         val h = rule.onNodeWithTag(TestTags.homeChannel(a)).fetchSemanticsNode().size.height.toFloat()
-        rule.onNodeWithTag(TestTags.homeChannelDrag(a), useUnmergedTree = true).performTouchInput {
-            down(center)
+        // つまみの反応する範囲は 48dp (H-4)。見た目のアイコン (内側の 24dp) の外、左上の角から 4dp の所を押して引く
+        val handle = rule.onNodeWithTag(TestTags.homeChannelDrag(a), useUnmergedTree = true)
+        val size = handle.fetchSemanticsNode().size
+        val dp = rule.density.density
+        assertTrue("つまみが 48dp 四方ある: $size", size.width >= 48 * dp - 1 && size.height >= 48 * dp - 1)
+        handle.performTouchInput {
+            down(androidx.compose.ui.geometry.Offset(4 * dp, 4 * dp))
             repeat(10) { moveBy(androidx.compose.ui.geometry.Offset(0f, h / 8f)) }
             up()
         }
