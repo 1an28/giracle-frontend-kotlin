@@ -85,6 +85,8 @@ object TestTags {
     const val COMPOSER_SEND = "composer.send"
     /** 返信先の表示 (入力欄の上) */
     const val COMPOSER_REPLY = "composer.reply"
+    /** メンションの候補 (入力欄の上、`@` を打つと出る) */
+    fun composerMention(userId: String) = "composer.mention:$userId"
 
     // 設定
     const val SETTINGS_KEEP_CONNECTION = "settings.keep_connection"
