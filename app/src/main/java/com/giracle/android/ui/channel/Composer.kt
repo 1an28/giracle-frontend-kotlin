@@ -54,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -252,6 +253,27 @@ fun Composer(
         candidates.forEach(store::putUser)
     }
 
+    // 入力欄では `@<id>` を `@名前` で見せる (#143、D-081)。状態は `@<id>` のまま (送る本文・下書き・編集と同じ)。
+    // 利用者の表は変換の中でだけ読み、Composer 自体は利用者の情報が増えても作り直さない
+    val usersState = store.users.collectAsStateWithLifecycle()
+    // 見た目は履歴のメンション (MessageItem、自分以外宛て) と同じ
+    val scheme = MaterialTheme.colorScheme
+    val nameOf = remember(usersState) { { id: String -> usersState.value[id]?.name } }
+    val mentionTransform = remember(nameOf, scheme.surfaceVariant, scheme.onSurface) {
+        val style = androidx.compose.ui.text.SpanStyle(background = scheme.surfaceVariant, color = scheme.onSurface, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+        MentionTransformations(nameOf, style)
+    }
+    // 名前が後から届いて表示が変わったら、入力中の IME に読み直させる (IME が古い表示の位置で編集しないように)
+    val view = androidx.compose.ui.platform.LocalView.current
+    val inputFocused = remember { booleanArrayOf(false) }
+    OnMentionNamesChanged(state, nameOf) {
+        if (inputFocused[0]) view.context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.restartInput(view)
+    }
+    // 下書き・編集の本文にある人の名前を取りに行く (名前が届くまでは `@<id>` のまま見える)
+    LaunchedEffect(state) {
+        snapshotFlow { mentionIds(state.text) }.collect { ids -> ids.forEach(store::ensureUser) }
+    }
+
     fun insertMention(u: User) {
         val (start, _) = mentionQuery ?: return
         val end = state.selection.start
@@ -437,7 +459,7 @@ fun Composer(
             if (candidates.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
                     items(candidates, key = { it.id }) { u ->
-                        Row(Modifier.fillMaxWidth().clickable { insertMention(u) }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth().testTag(TestTags.composerMention(u.id)).clickable { insertMention(u) }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Avatar(u.id, 28.dp)
                             Text(u.displayName)
                         }
@@ -477,7 +499,9 @@ fun Composer(
                 }
                 TextField(
                     state = state,
-                    modifier = Modifier.weight(1f).heightIn(max = 180.dp).testTag(TestTags.COMPOSER_INPUT).onPreviewKeyEvent { e ->
+                    inputTransformation = mentionTransform.input,
+                    outputTransformation = mentionTransform.output,
+                    modifier = Modifier.weight(1f).heightIn(max = 180.dp).testTag(TestTags.COMPOSER_INPUT).onFocusChanged { inputFocused[0] = it.isFocused }.onPreviewKeyEvent { e ->
                         // ハードウェアキーボード: Enter で送信 (設定 ON 時)、Shift+Enter で改行
                         if (settings.sendWithEnter && e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) { submit(); true } else false
                     }.then(

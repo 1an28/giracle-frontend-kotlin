@@ -170,6 +170,21 @@ class UiScreenshotTest {
         click(TestTags.COMPOSER_SEND)
         waitFor(messageWithText(typed)); shot("02b_sent")
 
+        // メンションの候補を選ぶと、入力欄には `@名前` が見え、送った本文は `@<id>` になる (#143)
+        val admin = runBlocking { fixture.userList(length = 5, username = adminUser) }.first { it.name == adminUser }
+        click(TestTags.COMPOSER_INPUT)
+        rule.onNodeWithTag(TestTags.COMPOSER_INPUT).performTextInput("@" + adminUser.take(3))
+        click(TestTags.composerMention(admin.id))
+        rule.waitUntil(5_000) {
+            rule.onNodeWithTag(TestTags.COMPOSER_INPUT).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text == "@${admin.name} "
+        }
+        shot("02c_mention_input")
+        rule.onNodeWithTag(TestTags.COMPOSER_INPUT).performTextInput("確認です")
+        click(TestTags.COMPOSER_SEND)
+        waitFor(messageWithText("@${admin.name} 確認です"))
+        val bodies = runBlocking { fixture.history(ch) }.history.map { it.content }
+        assertTrue(bodies.toString(), "@<${admin.id}> 確認です" in bodies)
+
         // 長押しで操作シート
         rule.onNodeWithTag(TestTags.CHANNEL_MESSAGES).performScrollToNode(hasTestTag(TestTags.message(greeting)))
         waitTag(TestTags.reaction(greeting, "heart"))
