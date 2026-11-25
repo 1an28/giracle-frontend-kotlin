@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -445,6 +446,46 @@ class UiScreenshotTest {
         awaitAdvancing { graph.store.hasNew.value[ch] != true }
         back(TestTags.SCREEN_HOME)
         // サーバーでも既読になっている (次につなぎ直したときに丸が戻らない)
+        awaitAdvancing { runBlocking { graph.api.hasNew()[ch] } != true }
+    }
+
+    /**
+     * 未読が多いチャンネルを開くと、未読の始まりへ位置を合わせる。最新を見ていないので、既読にしない (#153 のレビュー)
+     */
+    @Test fun manyUnreadStaysUnreadUntilBottom() {
+        assumeTrue(server != null)
+        val ch = newChannel("many")
+        send(ch, "自分のメッセージ")
+        val suffix = System.currentTimeMillis().toString().takeLast(6)
+        val other = runBlocking {
+            fixture.createInvite("um$suffix", 1)
+            val prefs = Prefs(ApplicationProvider.getApplicationContext(), "ui-other2").apply { clearSession() }
+            GiracleApi(buildOkHttp(prefs, null), Endpoint.parse(server!!)!!).also { api ->
+                api.signUp("um$suffix", "pass1234", "um$suffix")
+                api.signIn("um$suffix", "pass1234")
+                api.joinChannel(ch)
+            }
+        }
+        startApp()
+        val graph = ApplicationProvider.getApplicationContext<GiracleApp>().graph
+        // 既読の時刻をサーバーに作る (開いて最新を見る)
+        click(TestTags.homeChannel(ch))
+        waitTag(TestTags.SCREEN_CHANNEL)
+        awaitAdvancing { runBlocking { graph.api.readTimes() }.any { it.channelId == ch } }
+        back(TestTags.SCREEN_HOME)
+        // 未読を画面より多く送り、つなぎ直す (履歴は「キャッシュから」になり、開くと取り直してから未読の始まりへ位置を合わせる)
+        runBlocking { repeat(20) { other.send(ch, "未読 ${'$'}it", emptyList(), null) } }
+        awaitAdvancing { graph.store.hasNew.value[ch] == true }
+        runBlocking { graph.store.resync() }
+        click(TestTags.homeChannel(ch))
+        waitTag(TestTags.SCREEN_CHANNEL)
+        awaitAdvancing { graph.store.history(ch).value.let { it.loaded && !it.fromCache } }
+        advance(2_000)
+        assertTrue("最新を見ていないのに既読になった", graph.store.hasNew.value[ch] == true)
+        assertTrue("最新を見ていないのにサーバーで既読になった", runBlocking { graph.api.hasNew()[ch] } == true)
+        // 最新まで動かすと既読になる
+        rule.onNodeWithTag(TestTags.CHANNEL_MESSAGES).performScrollToIndex(0)
+        awaitAdvancing { graph.store.hasNew.value[ch] != true }
         awaitAdvancing { runBlocking { graph.api.hasNew()[ch] } != true }
     }
 

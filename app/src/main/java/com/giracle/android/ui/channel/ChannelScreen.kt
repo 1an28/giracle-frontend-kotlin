@@ -172,20 +172,28 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
         }
     }
 
+    // 既読にしてよいか。開いた直後は一覧の先頭 (最新) が出ているが、すぐに未読の始まりや指定のメッセージへ動かす。
+    // 動かす前に既読にすると、最新を見ていないのに既読になる (#153 のレビュー)。位置を合わせ終えてから既読にする
+    var readArmed by remember(channelId) { mutableStateOf(false) }
+
     // ---- 指定メッセージへ移動 ----
     suspend fun jump(messageId: String) {
         // 圏外などで取れないときは、落ちずに理由を出す (以前は通知から開いたときに圏外だとアプリが落ちていた)
+        // 動かし終えたら (動かせなくても) 既読にしてよい。強調表示の待ち (2.5 秒) は待たない
         val ok = try {
             store.jumpToMessage(channelId, messageId)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            readArmed = true
             ctx.toast(e.userMessage()); return
         }
-        if (!ok) { ctx.toast("対象のメッセージを取得できませんでした。削除された可能性があります。"); return }
+        if (!ok) { readArmed = true; ctx.toast("対象のメッセージを取得できませんでした。削除された可能性があります。"); return }
         val idx = store.history(channelId).value.messages.indexOfFirst { it.id == messageId }
+        if (idx < 0) readArmed = true
         if (idx >= 0) {
             listState.scrollToItem(idx)
+            readArmed = true
             highlight = messageId
             delay(2500)
             highlight = null
@@ -199,13 +207,19 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
     var positioned by remember(channelId) { mutableStateOf(jumpTo != null) }
     val ready = history.loaded && !history.fromCache
     LaunchedEffect(ready) {
-        if (!ready || positioned) return@LaunchedEffect
+        if (!ready) return@LaunchedEffect
+        // 指定のメッセージへ飛ぶとき (jumpTo) は、飛び終えたところで既読にしてよくなる ([jump])
+        if (positioned) { if (jumpTo == null) readArmed = true; return@LaunchedEffect }
         positioned = true
-        if (listState.firstVisibleItemIndex > 0) return@LaunchedEffect
-        val before = readBefore[channelId]
-        if (before.isNullOrEmpty()) return@LaunchedEffect
-        val firstUnread = history.messages.indexOfLast { ChatStore.isAfter(it.createdAt, before) }
-        if (firstUnread > 2) listState.scrollToItem(firstUnread - 2)
+        try {
+            if (listState.firstVisibleItemIndex > 0) return@LaunchedEffect
+            val before = readBefore[channelId]
+            if (before.isNullOrEmpty()) return@LaunchedEffect
+            val firstUnread = history.messages.indexOfLast { ChatStore.isAfter(it.createdAt, before) }
+            if (firstUnread > 2) listState.scrollToItem(firstUnread - 2)
+        } finally {
+            readArmed = true
+        }
     }
 
     // ---- 未読の始まりへ戻る (docs/UI_PRINCIPLES.md の C-5) ----
@@ -269,7 +283,7 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
     // 読み込み・取り直しが済んでも既読にし直さないため、未読の丸が残っていた (#153)。
     // 取り直しで一覧の先頭が変わらない (キャッシュに新着が既に入っていた) ときも、キャッシュでなくなったことで既読にする
     LaunchedEffect(channelId) {
-        snapshotFlow { ReadKey(atBottom, history.messages.firstOrNull { !it.pending }?.id, history.atEnd && !history.fromCache) }
+        snapshotFlow { ReadKey(atBottom && readArmed, history.messages.firstOrNull { !it.pending }?.id, history.atEnd && !history.fromCache) }
             .filter { it.atBottom }
             .collect { store.markRead(channelId) }
     }
