@@ -65,16 +65,25 @@ fun rememberUser(userId: String): User? {
     return u
 }
 
-/** ユーザーのアイコン。読み込み前と失敗時は名前の頭文字を出す */
+/**
+ * ユーザーのアイコン。読み込み前と失敗時は名前の頭文字を出す。
+ * 表示するたびに、アイコンが変わっていないかを裏で確かめる (期限内なら何もしない。#148、D-082)。
+ */
 @Composable
-fun Avatar(userId: String, size: Dp = 40.dp, modifier: Modifier = Modifier, version: Int = 0) {
+fun Avatar(userId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
     val graph = LocalGraph.current
     val name = rememberUser(userId)?.name
     val ctx = LocalContext.current
     val px = with(androidx.compose.ui.platform.LocalDensity.current) { size.roundToPx() }
-    // アイコンは小さく縮めて読み込み、メモリと描画コストを抑える
-    val req = remember(userId, px, version) {
-        ImageRequest.Builder(ctx).data(graph.api.iconUrl(userId) + if (version > 0) "?v=$version" else "").size(px).crossfade(false).build()
+    val url = graph.api.iconUrl(userId)
+    val versionFlow = remember(graph, url) {
+        graph.avatars.check(url)
+        graph.avatars.versionsFlow.map { it[url] ?: 0 }.distinctUntilChanged()
+    }
+    val version by versionFlow.collectAsStateWithLifecycle(graph.avatars.versionOf(url))
+    // アイコンは小さく縮めて読み込み、メモリと描画コストを抑える。アイコンが替わったら (version) 作り直して読み込み直す
+    val req = remember(url, px, version) {
+        ImageRequest.Builder(ctx).data(url).size(px).crossfade(false).build()
     }
     Box(
         modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),

@@ -112,19 +112,18 @@ private fun ColumnScope.ProfileTab() {
     val u = me ?: return
     var name by remember(u.id) { mutableStateOf(u.name ?: "") }
     var intro by remember(u.id) { mutableStateOf(u.selfIntroduction) }
-    var iconVersion by remember { mutableIntStateOf(0) }
     var pw by remember { mutableStateOf(false) }
 
     fun act(f: suspend () -> Unit) = scope.launch { runCatching { f() }.onSuccess { ctx.toast("更新しました") }.onFailure { ctx.toast(it.userMessage()) } }
     val pickIcon = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) act { graph.api.changeIcon(ctx.uploadFileFrom(uri)); clearImageCache(ctx, graph.api.iconUrl(u.id)); iconVersion++ }
+        if (uri != null) act { graph.api.changeIcon(ctx.uploadFileFrom(uri)); graph.avatars.check(graph.api.iconUrl(u.id), force = true) }
     }
     val pickBanner = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) act { graph.api.changeBanner(ctx.uploadFileFrom(uri)); clearImageCache(ctx, graph.api.bannerUrl(u.id)) }
     }
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Avatar(u.id, 64.dp, version = iconVersion)
+        Avatar(u.id, 64.dp)
         Column {
             Text(u.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { u.roleLink.mapNotNull { roles[it.roleId] }.forEach { RoleChip(it) } }
