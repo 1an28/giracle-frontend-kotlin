@@ -265,9 +265,12 @@ fun ChannelScreen(channelId: String, jumpTo: String?) {
 
     // ---- 既読: 最新を表示しているとき ----
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 200 } }
+    // 履歴は画面の State (history) から読む。StateFlow の value を直接読むと snapshotFlow が変化に気づかず、
+    // 読み込み・取り直しが済んでも既読にし直さないため、未読の丸が残っていた (#153)。
+    // 取り直しで一覧の先頭が変わらない (キャッシュに新着が既に入っていた) ときも、キャッシュでなくなったことで既読にする
     LaunchedEffect(channelId) {
-        snapshotFlow { atBottom to store.history(channelId).value.messages.firstOrNull()?.id }
-            .filter { it.first }
+        snapshotFlow { ReadKey(atBottom, history.messages.firstOrNull { !it.pending }?.id, history.atEnd && !history.fromCache) }
+            .filter { it.atBottom }
             .collect { store.markRead(channelId) }
     }
     // 自分の送信・新着で最下部にいれば追従する
@@ -703,3 +706,6 @@ fun download(ctx: Context, url: String, f: FileAttached, token: String?) {
 
 /** 未読の始まりが、画面のどこにあるか (一覧は新しいものが下) */
 private enum class UnreadPlace { None, Visible, Above, Below }
+
+/** 既読にし直す契機 (#153): 最下部にいるか・最新のメッセージ・最新側をサーバーから読み込み済みか */
+private data class ReadKey(val atBottom: Boolean, val newestId: String?, val fresh: Boolean)

@@ -402,6 +402,52 @@ class UiScreenshotTest {
         shot("14_pane_wide_kept")
     }
 
+    /**
+     * 新着を受け取った後につなぎ直し (履歴が「キャッシュから」になる)、そのチャンネルを開くと未読の丸が消える (#153)。
+     * キャッシュに新着が既に入っていると、取り直しても一覧の先頭が変わらない。そのとき既読にし損ねて丸が残っていた
+     */
+    @Test fun unreadClearsAfterReconnect() {
+        assumeTrue(server != null)
+        val ch = newChannel("unread")
+        send(ch, "自分のメッセージ")
+        // 別の人を用意する (アプリと同じ管理者が送ると、自分の送信なので未読にならない)
+        val suffix = System.currentTimeMillis().toString().takeLast(6)
+        val other = runBlocking {
+            fixture.createInvite("ur$suffix", 1)
+            val prefs = Prefs(ApplicationProvider.getApplicationContext(), "ui-other").apply { clearSession() }
+            GiracleApi(buildOkHttp(prefs, null), Endpoint.parse(server!!)!!).also { api ->
+                api.signUp("ur$suffix", "pass1234", "ur$suffix")
+                api.signIn("ur$suffix", "pass1234")
+                api.joinChannel(ch)
+            }
+        }
+        startApp()
+        val graph = ApplicationProvider.getApplicationContext<GiracleApp>().graph
+        // 一度開いて履歴を読み込み、ホームへ戻る
+        click(TestTags.homeChannel(ch))
+        waitTag(TestTags.SCREEN_CHANNEL)
+        rule.waitUntil(10_000) { graph.store.history(ch).value.loaded }
+        rule.waitUntil(10_000) { graph.ws.state.value == com.giracle.android.data.net.WsClient.State.Connected }
+        // 開いたので既読の時刻がサーバーに届く (届かないと、サーバーは未読と判定しない)
+        awaitAdvancing { runBlocking { graph.api.readTimes() }.any { it.channelId == ch } }
+        back(TestTags.SCREEN_HOME)
+        // ホームにいる間に、別の人が送る (WebSocket で届き、履歴にも入り、未読になる)
+        val latest = runBlocking { other.send(ch, "ホームにいる間の新着", emptyList(), null).id }
+        awaitAdvancing { graph.store.hasNew.value[ch] == true && graph.store.history(ch).value.messages.any { it.id == latest } }
+        // つなぎ直す (背面から戻ったときなど)。開いていないチャンネルの履歴は「キャッシュから」になる
+        runBlocking { graph.store.resync() }
+        assertTrue(graph.store.history(ch).value.fromCache)
+        assertTrue(graph.store.hasNew.value[ch] == true)
+        // 開くと、取り直した後に既読になり、丸が消える
+        click(TestTags.homeChannel(ch))
+        waitTag(TestTags.message(latest))
+        awaitAdvancing { !graph.store.history(ch).value.fromCache }
+        awaitAdvancing { graph.store.hasNew.value[ch] != true }
+        back(TestTags.SCREEN_HOME)
+        // サーバーでも既読になっている (次につなぎ直したときに丸が戻らない)
+        awaitAdvancing { runBlocking { graph.api.hasNew()[ch] } != true }
+    }
+
     @Test fun login() {
         assumeTrue(server != null)
         val app = ApplicationProvider.getApplicationContext<GiracleApp>()
