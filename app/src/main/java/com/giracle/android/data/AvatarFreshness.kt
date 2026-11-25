@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
  * サーバーはアイコンを変えても知らせを出さず (`/user/change-icon` はシグナルを送らない)、URL も変わらない。
  * そのため、他の人がアイコンを変えても、このアプリでは古いまま残っていた。
  *
- * ここでは、表示されたアイコンを [ttlMillis] に 1 回まで (プロセスを起こした直後は必ず 1 回) 裏でサーバーに取りに行き、
+ * ここでは、表示されたアイコンを [ttlMillis] に 1 回まで (アプリのプロセスが起きた直後は必ず 1 回) 裏でサーバーに取りに行き、
  * 手元の画像と中身が違えば手元の画像を捨てて [versionOf] を進める。[versionOf] を見ている表示は読み込み直す。
  * 圏外などで取りに行けなかったときは何もしない (古いアイコンを出したままにする。頭文字に戻さない)。
  */
@@ -46,8 +46,11 @@ class AvatarFreshness(
     /** URL → 最後にサーバーへ確かめに行った時刻 */
     private val checkedAt = ConcurrentHashMap<String, Long>()
     private val versions = MutableStateFlow<Map<String, Int>>(emptyMap())
-    /** 一度に取りに行く数を抑える (チャンネルを開いた直後にアイコンが並んでも回線を埋めない) */
-    private val gate = Semaphore(4)
+    /**
+     * 一度に取りに行く数を抑える。OkHttp の同じサーバーへの同時接続は既定で 5 つで、履歴・API・画像と共有している。
+     * 起動直後にアイコンが並んでも、履歴などの取得を待たせないよう 2 つまでにする
+     */
+    private val gate = Semaphore(2)
 
     /** 表示中の画像を読み込み直すための番号。アイコンが替わるたびに増える */
     val versionsFlow: StateFlow<Map<String, Int>> get() = versions
@@ -95,6 +98,8 @@ class AvatarFreshness(
         if (changed) {
             withContext(Dispatchers.IO) { cache.evict(url) }
             versions.update { it + (url to ((it[url] ?: 0) + 1)) }
+            // 捨てたのと同じころにディスクから読んでいた古い画像が、捨てた後にメモリへ入りうる。読み込み直す前にもう一度捨てる
+            withContext(Dispatchers.IO) { cache.evict(url) }
         }
     }
 
