@@ -4,15 +4,22 @@
 # 直すときは環境の手順も同じに直す (リポジトリだけ直しても、環境の保存は作り直されない)
 set -euo pipefail
 SDK=/opt/android-sdk
-# 1. Android SDK: Google の公式の道具を、利用状況を送らない指定で使う
-if [ ! -x "$SDK/cmdline-tools/latest/bin/android" ]; then
-  t=$(mktemp -d)
-  curl -fsSL -o "$t/c.zip" https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
-  echo "e025545c62a8e64c7559119566a569fb1dec5f60  $t/c.zip" | sha1sum -c --quiet -
-  unzip -q "$t/c.zip" -d "$t" && mkdir -p "$SDK/cmdline-tools" && mv "$t/cmdline-tools" "$SDK/cmdline-tools/latest"
-  rm -rf "$t"
-fi
-"$SDK/cmdline-tools/latest/bin/android" --no-metrics --sdk="$SDK" sdk install "build-tools;36.0.0" "platforms;android-37.0" || true
+# 1. Android SDK: Google の公式の道具を、利用状況を送らない指定で使う。
+#    失敗しても会話は始められるようにする (準備の手順が 0 以外で終わると会話が始まらないことがある)
+install_sdk() {
+  # `||` の中では set -e が効かないので、各段を && でつなぎ、検査値が合わなければ先へ進まない
+  if [ ! -x "$SDK/cmdline-tools/latest/bin/android" ]; then
+    t=$(mktemp -d) &&
+    curl -fsSL -o "$t/c.zip" https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip &&
+    echo "e025545c62a8e64c7559119566a569fb1dec5f60  $t/c.zip" | sha1sum -c --quiet - &&
+    unzip -q "$t/c.zip" -d "$t" &&
+    rm -rf "$SDK/cmdline-tools/latest" && mkdir -p "$SDK/cmdline-tools" &&
+    mv "$t/cmdline-tools" "$SDK/cmdline-tools/latest" &&
+    rm -rf "$t" || return 1
+  fi
+  "$SDK/cmdline-tools/latest/bin/android" --no-metrics --sdk="$SDK" sdk install "build-tools;36.0.0" "platforms;android-37.0"
+}
+install_sdk || echo "cloud-setup: Android SDK を入れられなかった" >&2
 # 2. この作業場所でだけ、Maven Central の取得先を Google のミラーに替える (出口が 429 で断られるため。CI は変えない)
 mkdir -p ~/.gradle/init.d
 cat > ~/.gradle/init.d/maven-central-mirror.gradle <<'G'
@@ -36,4 +43,6 @@ if [ -d giracle-frontend-kotlin ]; then
   # 速く終わる単体テストを 1 つ流し、単体テストに要る部品をすべて取る
   # 上限 220 秒。取れなくても会話は始められるようにする (保存は約 5 分以内に終わったときだけ作られる)
   timeout 220 ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.giracle.android.MessageParserTest' || true
+else
+  echo "cloud-setup: $(pwd) に giracle-frontend-kotlin が無いので、部品の取り置きを飛ばした" >&2
 fi
