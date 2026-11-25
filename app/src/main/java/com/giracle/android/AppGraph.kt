@@ -74,6 +74,21 @@ class AppGraph(context: Context) {
         store.appInForeground = fg
     }
 
+    /** 他の人がアイコンを変えたら表示を替える (#148、D-082) */
+    val avatars = com.giracle.android.data.AvatarFreshness(http, scope, object : com.giracle.android.data.AvatarFreshness.IconCache {
+        private val loader get() = coil3.SingletonImageLoader.get(appContext)
+        override fun diskBytes(url: String): ByteArray? {
+            val disk = loader.diskCache ?: return null
+            return disk.openSnapshot(url)?.use { snap -> disk.fileSystem.read(snap.data) { readByteArray() } }
+        }
+        override fun inMemory(url: String): Boolean = loader.memoryCache?.keys?.any { it.key == url } == true
+        override fun evict(url: String) {
+            loader.diskCache?.remove(url)
+            val mem = loader.memoryCache ?: return
+            mem.keys.filter { it.key == url }.forEach { mem.remove(it) }
+        }
+    })
+
     /** 電波が無くて送れなかったメッセージ (#30、D-029) */
     val outbox = com.giracle.android.data.Outbox(File(appContext.filesDir, "outbox.json"))
 

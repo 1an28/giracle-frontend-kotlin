@@ -89,14 +89,18 @@ object Notifier {
 
     /** 送信者のアイコンを読み込む。間に合わない・失敗したときは null (名前だけで出す) */
     private suspend fun senderIcon(context: Context, userId: String): IconCompat? {
-        synchronized(icons) { icons.get(userId) }?.let { return it }
         val graph = (context.applicationContext as GiracleApp).graph
+        val url = graph.api.iconUrl(userId)
+        // アイコンが替わっていないか裏で確かめる。替わっていれば次の通知から新しいものを使う (#148、D-082)
+        graph.avatars.check(url)
+        val key = "$userId#${graph.avatars.versionOf(url)}"
+        synchronized(icons) { icons.get(key) }?.let { return it }
         val bmp = withTimeoutOrNull(ICON_TIMEOUT_MS) {
-            val req = ImageRequest.Builder(context).data(graph.api.iconUrl(userId)).size(ICON_PX).allowHardware(false).build()
+            val req = ImageRequest.Builder(context).data(url).size(ICON_PX).allowHardware(false).build()
             (SingletonImageLoader.get(context).execute(req) as? SuccessResult)?.image?.toBitmap()
         } ?: return null
         val icon = IconCompat.createWithBitmap(circle(bmp))
-        synchronized(icons) { icons.put(userId, icon) }
+        synchronized(icons) { icons.put(key, icon) }
         return icon
     }
 
