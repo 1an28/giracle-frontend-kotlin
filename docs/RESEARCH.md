@@ -232,3 +232,22 @@
 - 推測: このアプリに当てはまるのは「多くの人が頼る機能が揃っていること」と、移る人の手間や失うものを減らすこと (端末の確認の段階)。Element X は旧アプリの置き換えで、このアプリは Web 版と並んで使われる点が違う。
   安定の基準 (落ちる率など) があったかは、この記事からは分からない
 - 次: D-075 で 1.0 の条件を仮に決めた。安定と更新の条件は、Element X からではなく自分の判断として分けて書いた
+
+## 2026-11-25
+
+### クラウドの作業場所で部品を毎回取りに行くのは普通か (Maven Central・環境の保存・ミラー)
+- 入り口: 振り返りで持ち主が「ほかの Android 個人開発者はどうしているのか」「毎回取りに行くのはクラウド特有か」と疑った。私は「作業場所に物を置いておく方法は無い」と思い込んでいた
+- 確かめたこと (本文を読んだ):
+  - Claude Code のクラウド環境は、準備の手順が約 5 分以内に終わると作業場所の中身を保存し、次の会話はそこから始まる。約 7 日・手順や許可ホストの変更で作り直し
+    ([cloud-environments](https://code.claude.com/docs/en/cloud-environments))。思い込みは誤りだった
+  - OpenAI Codex のクラウド環境も、準備の手順の後の状態を最大 12 時間保存する ([Codex cloud environments](https://developers.openai.com/codex/cloud/environments))
+  - Sonatype: 429 は最も多く使う数 % に絞って当てている。問題は個人や小さなチームではなく産業規模の使い方。使い捨ての環境から同じ物を何度も取ることを減らしてほしい。
+    やり直すほど悪くなり、締め出しは最長 30 日まで伸びうる。共有の出口は 1 つの大口として数えられ、まず出口の提供元に相談するよう勧めている
+    ([429](https://central.sonatype.org/faq/429-error/)・[共有の出口](https://central.sonatype.org/faq/429-shared-egress/))
+  - Google のミラー: 正式なサービスではない。米州向けは 1 日 12 回写す。2017 年に一度更新が止まった ([ミラーのページ](https://maven-central.storage.googleapis.com/index.html))。
+    2015 年に Maven の創始者が置き、Google の技術者がブログで紹介 ([Google Cloud Blog](https://cloudplatform.googleblog.com/2015/11/faster-builds-for-Java-developers-with-Maven-Central-mirror.html))
+  - 自分で試した: Coil の部品 1 つが本家と SHA-256 で一致。Kotlin の部品の署名が JetBrains の「Kotlin Release」の鍵で通った (鍵は keys.openpgp.org から。JetBrains の公式ページで指紋は照らしていない)
+  - Android SDK の `sdkmanager` は今は非推奨で、Android CLI を取りに行き、既定で利用状況を送ると表示する。`--no-metrics` で止められる
+- 検索結果の要約で見ただけ: Spark・Flink がミラーを使っていた。写しの遅れや URL の変更で壊れた報告 (Travis CI の掲示板)。grpc-java が 2025 年 1 月に例の設定からミラーを外した (理由は不明)。Bitrise が 429 対策に自前のミラーを用意した。改ざんの話は見つからなかった
+- 推測: 個人開発者は自分の PC で開発し、部品は PC に残るので、毎回取りに行くのは使い捨ての環境に特有。CI は保存の仕組みで使い回す (このリポジトリの CI も使い回している。ログで確認)
+- 判断に使った: D-083

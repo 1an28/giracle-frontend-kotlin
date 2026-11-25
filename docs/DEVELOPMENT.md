@@ -6,6 +6,15 @@
 - Android SDK (platforms;android-37.0, build-tools;37.0.0)。`local.properties` に `sdk.dir=...`
 - ローカル検証用: [Bun](https://bun.sh) と Node.js (バックエンドと Web 版を動かす)
 
+## Claude Code のクラウドの作業場所 (D-083)
+
+- このリポジトリの会話は、環境「giracle-frontend-kotlin」で始める。準備の手順 (控えは `devtools/cloud-setup.sh`) が
+  Android SDK を入れ、単体テストに要る部品を取り置く。手順が約 5 分以内に終われば作業場所の中身が保存され、次の会話からはそこから始まる (約 7 日で作り直し)
+- この作業場所の出口は Maven Central から 429 (Too Many Requests) で断られることが多い。そのため、作業場所でだけ
+  `~/.gradle/init.d/maven-central-mirror.gradle` で Maven Central の取得先を Google のミラーに替える。リポジトリと CI の設定は変えない
+- push の前に、変えたところの単体テストを手元で流す (`./gradlew :app:testDebugUnitTest --tests '<クラス>'`)。CI は最後の確かめにする
+- 準備の手順を直すときは、環境の手順 (正本) と `devtools/cloud-setup.sh` (控え) の両方を直す
+
 ## ビルド
 
 ```bash
