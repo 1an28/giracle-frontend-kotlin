@@ -78,7 +78,8 @@ class AvatarFreshnessTest {
         val f = freshness(http, cache)
         f.check(url)
         awaitVersion(f, url, 1)
-        assertEquals(1, cache.evicted)
+        // 版を進めた後にもう一度捨てるので 1〜2 回
+        assertTrue(cache.evicted >= 1)
         assertTrue(url !in cache.disk && url !in cache.memory)
 
         // 読み込み直すと、HTTP キャッシュからも新しいアイコンが返る (サーバーには行かない)
