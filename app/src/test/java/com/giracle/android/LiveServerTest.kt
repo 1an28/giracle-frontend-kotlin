@@ -167,7 +167,7 @@ class LiveServerTest {
         restored.openChannel(ch)
         assertTrue(!restored.history(ch).value.fromCache)
 
-        // 後片付け (未読の通知が残っているとチャンネル削除がサーバー側で失敗するため先に消す。docs/SERVER_CHANGES.md 参照)
+        // 後片付け (通知は S-1 が直る前の backend ではチャンネル削除を 500 にしていたので先に消す。今は無くても消せる。docs/SERVER_CHANGES.md 参照)
         a.store.clearInbox(); b.store.clearInbox()
         admin.api.deleteChannel(ch)
         admin.api.deleteRole(role.id)
