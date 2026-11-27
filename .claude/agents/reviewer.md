@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: マージ前に PR の差分だけを読み、正しさと要件に関わる問題だけを指摘するレビュー役。差分 (git diff の範囲や PR 番号) と、その PR が満たすべき要件を渡して使う。
+description: PR を作る前 (またはマージ前) に差分だけを読み、正しさと要件に関わる問題だけを指摘するレビュー役。差分 (git diff の範囲・ブランチ名・PR 番号) と、その変更が満たすべき要件を渡して使う (D-087)。
 tools: Read, Grep, Glob, Bash
 ---
 
