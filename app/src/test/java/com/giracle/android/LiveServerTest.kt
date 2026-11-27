@@ -167,7 +167,7 @@ class LiveServerTest {
         restored.openChannel(ch)
         assertTrue(!restored.history(ch).value.fromCache)
 
-        // 後片付け (未読の通知が残っているとチャンネル削除がサーバー側で失敗するため先に消す。docs/SERVER_CHANGES.md 参照)
+        // 後片付け (通知は S-1 が直る前の backend ではチャンネル削除を 500 にしていたので先に消す。今は無くても消せる。docs/SERVER_CHANGES.md 参照)
         a.store.clearInbox(); b.store.clearInbox()
         admin.api.deleteChannel(ch)
         admin.api.deleteRole(role.id)
@@ -176,9 +176,8 @@ class LiveServerTest {
 
     /** 管理者によるパスワードのリセット (D-022): 新しいパスワードでログインでき、古いものは使えなくなる */
     /**
-     * サーバーの不具合 S-1 (#24): 未読のメンションが残っているチャンネルを削除すると 500 になる。
-     * どちらでも成功にし、結果を CI のログに出す (アプリの不具合ではないので失敗にしない。
-     * スキップにすると、live-test の「スキップがあれば失敗」の確認 (サーバーが立っていないのに通るのを防ぐもの) にかかる)。
+     * サーバーの不具合 S-1 (#24): 未読のメンションが残っているチャンネルを削除すると 500 になっていた。
+     * backend `244dfe6` (2026-11-24) で直ったので、戻っていないことを確かめる (500 なら失敗)。
      */
     @Test fun deleteChannelWithUnreadMention() = runBlocking {
         assumeTrue("GIRACLE_TEST_SERVER 未指定のためスキップ", server != null)
@@ -194,17 +193,7 @@ class LiveServerTest {
         runCatching { admin.api.joinChannel(ch) }
         u.api.joinChannel(ch)
         admin.api.send(ch, "未読のメンション @<$uId>", emptyList(), null)
-        val result = runCatching { admin.api.deleteChannel(ch) }
-        val err = result.exceptionOrNull()
-        if (err is com.giracle.android.data.net.ApiException && err.code >= 500) {
-            println("S-1: まだ直っていない (チャンネル削除が ${err.code})。#24")
-            // 後片付け: 通知を消してから消し直す
-            runCatching { u.api.inboxClear() }
-            runCatching { admin.api.deleteChannel(ch) }
-            return@runBlocking
-        }
-        result.getOrThrow()
-        println("S-1: 直っている (未読のメンションがあっても削除できた)。#24 を閉じてよい")
+        admin.api.deleteChannel(ch)
     }
 
     /** ホームの「すべて既読」: 未読のチャンネルを、それぞれの最新のメッセージまで既読にする */
