@@ -11,7 +11,7 @@ Android ネイティブアプリ (Giracle Native) を作るなかで分かった
 
 | ID | 種類 | 内容 | 急ぎ度 | 関連 Issue |
 | --- | --- | --- | --- | --- |
-| S-1 | 不具合 | 通知が残っているチャンネルを削除すると 500 になる | 作者が直すと返事 (2026-11-12)。未修正 (`87be860` 時点) | - |
+| S-1 | 不具合 | 通知が残っているチャンネルを削除すると 500 になる | **直った** (backend `244dfe6`、2026-11-24。ローカルで確かめた 2026-11-28)。本番に入ったかは未確認 | [#24](https://github.com/1an28/giracle-frontend-kotlin/issues/24) |
 | S-3 | 相談 | アプリからの WebSocket 接続の正式な入口 | 急がない (今は暫定の方法で動いている) | [#7](https://github.com/1an28/giracle-frontend-kotlin/issues/7) |
 | S-5 | 要望 | ログインのトークンを Cookie 以外でも受け渡せるようにする | 急がない | [#7](https://github.com/1an28/giracle-frontend-kotlin/issues/7) |
 | S-2 | 情報 | プッシュ通知: **サーバーの変更は不要になった** (アプリが FCM 経由の Web Push を受ける)。作者の方針「Apple は APNs、Web と Android は Web Push」と一致 (2026-11-13) | 本番から FCM へ送れるかだけ確認したい | [#6](https://github.com/1an28/giracle-frontend-kotlin/issues/6) |
@@ -23,7 +23,7 @@ Android ネイティブアプリ (Giracle Native) を作るなかで分かった
 
 ### 話すときのチェックリスト
 
-- [x] S-1 を直してもらえるか → 直すと返事をもらった (2026-11-12)
+- [x] S-1 を直してもらえるか → 直すと返事をもらった (2026-11-12)。backend `244dfe6` で直った (2026-11-24)
 - [ ] S-2: Web 版のプッシュ通知が Chrome で届いているか (届いていれば、本番から `fcm.googleapis.com` へ送れている)
 - [ ] S-3 / S-5: アプリ向けの認証・接続方法をどうするか (案は下に)
 
@@ -44,8 +44,11 @@ Android ネイティブアプリ (Giracle Native) を作るなかで分かった
     単体のメッセージ削除 (`/message/delete`) は Inbox を先に消しているので、それとそろう。
   - `Inbox.messageId` を `onDelete: "cascade"` にする。
 - **直ったかの確かめ方**: CI の `live-test` が、backend の最新版で毎回 `LiveServerTest.deleteChannelWithUnreadMention` を動かす。
-  テストはどちらでも成功にし、ログに `S-1: まだ直っていない` か `S-1: 直っている` と出す
   (2026-11-13 時点の `87be860` ではまだ 500)。
+- **直った (2026-11-24、backend `244dfe6`「InboxにchannelIdを紐付け、チャンネル削除時に通知も削除する (#182)」)**:
+  Inbox に `channelId` (チャンネルの削除で cascade) を足し、`ServiceChannel.Delete` のトランザクションの先頭でそのチャンネルの Inbox を消す形。
+  確かめたこと: この会話の作業場所に backend `2be5bd5` を立て、`LiveServerTest.deleteChannelWithUnreadMention` が「直っている」側を通った (2026-11-28)。
+  このテストは、500 なら失敗する退行の確認に変えた (#24)。確かめていないこと: 本番 (chat.girak.moe) にこの版が入ったか
 
 ---
 
