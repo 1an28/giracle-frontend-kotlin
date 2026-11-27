@@ -4,6 +4,8 @@
 #   APP_APK : 確かめる APK (既定: assembleRelease の出力)
 #   LAN_SERVER : 端末から LAN のアドレスで見たサーバー (既定 http://10.0.2.2:3333 = エミュレータから見たランナー)。
 #                電波を切る確認 (#37) とローカルネットワーク権限の確認 (#42) に使う。空にすると飛ばす
+#   UPDATE_FEED_PORT : 新しい版の確認 (#147) の偽の応答を出すポート (既定 3335。APK は
+#              -Pgiracle.updateCheckUrl=http://localhost:3335/latest.json で作る)。空にすると立てず、知らせの確認も飛ばす
 #   PREV_APK : 上書き更新の確認 (D-075 の 3、D-080) の元にする前の版の APK (APP_APK と同じ鍵で署名したもの)。
 #              空なら飛ばす。指定したのにファイルが無ければ (前の版を作れなかった) 失敗にする
 # 結果は e2e-out/ (画面・logcat・crash バッファ) に置く。
@@ -14,6 +16,9 @@ AAPT2=$(ls -d "$SDK"/build-tools/*/aapt2 | sort -V | tail -1)
 APP_APK=${APP_APK:-app/build/outputs/apk/release/app-release.apk}
 LAN_SERVER=${LAN_SERVER-http://10.0.2.2:3333}
 PREV_APK=${PREV_APK:-}
+UPDATE_FEED_PORT=${UPDATE_FEED_PORT-3335}
+# 偽の応答に入れる版。今の版より必ず新しい
+UPDATE_FEED_VERSION=99.0.0
 TEST_APK=$(ls e2e/build/outputs/apk/debug/*.apk | head -1)
 APP_PKG=$("$AAPT2" dump packagename "$APP_APK")
 TEST_PKG=$("$AAPT2" dump packagename "$TEST_APK")
@@ -24,6 +29,19 @@ echo "app: $APP_PKG ($APP_APK)  test: $TEST_PKG ($TEST_APK)"
 set -e
 # 端末の localhost:3333 をランナーのサーバーにつなぐ (アプリが送る Origin が CORS_ORIGIN と一致する)
 "$ADB" reverse tcp:3333 tcp:3333
+# 新しい版の確認 (#147、D-086) の偽の応答。GitHub には問い合わせない。端末の localhost (adb reverse) で渡すのは、
+# 10.0.2.2 (LAN のアドレス) だと Android 17 のローカルネットワーク権限 (#42) が要り、許可していない確認で届かないため
+UPDATE_ARGS=()
+if [ -n "$UPDATE_FEED_PORT" ]; then
+  mkdir -p "$OUT/update-feed"
+  printf '{"tag_name":"v%s","html_url":"https://github.com/1an28/giracle-frontend-kotlin/releases","prerelease":false,"draft":false}' \
+    "$UPDATE_FEED_VERSION" > "$OUT/update-feed/latest.json"
+  python3 -m http.server "$UPDATE_FEED_PORT" --bind 127.0.0.1 --directory "$OUT/update-feed" > "$OUT/update-feed.log" 2>&1 &
+  UPDATE_FEED_PID=$!
+  trap 'kill $UPDATE_FEED_PID 2>/dev/null || true' EXIT
+  "$ADB" reverse tcp:$UPDATE_FEED_PORT tcp:$UPDATE_FEED_PORT
+  UPDATE_ARGS=(-e updateVersion "$UPDATE_FEED_VERSION")
+fi
 "$ADB" install -r -t "$TEST_APK"
 "$ADB" shell pm list instrumentation
 # 送信を押した直後のスタックと描画の間隔を記録させる (SendTrace.profileAfterTap、#70、D-068)。利用者の端末では付かない
@@ -122,7 +140,7 @@ logcat_start "$OUT/logcat.txt" fast
 t0=$(date +%s)
 LAN_ARGS=()
 [ -n "$LAN_SERVER" ] && LAN_ARGS=(-e lanServer "$LAN_SERVER")
-"$ADB" shell am instrument -w -e appPackage "$APP_PKG" -e server http://localhost:3333 "${LAN_ARGS[@]}" \
+"$ADB" shell am instrument -w -e appPackage "$APP_PKG" -e server http://localhost:3333 "${LAN_ARGS[@]}" "${UPDATE_ARGS[@]}" \
   "$TEST_PKG/androidx.test.runner.AndroidJUnitRunner" 2>&1 | tee "$OUT/instrument.txt"
 echo "e2e: $(( $(date +%s) - t0 ))s"
 logcat_stop "$OUT/logcat.txt" fast
@@ -171,7 +189,7 @@ show_clues() {
   # 送信待ち・接続・再同期の記録 (#101)。上の 2 つは最後の行だけなので、前半のテストの記録が押し出される。タグで絞って全部出す
   # 送信の経路 (GiracleSend、#94) も、どこまで進んだかを追えるよう同じところに出す
   echo "::group::送信・送信待ち・接続・再同期 (GiracleSend・Outbox・GiracleWs・GiracleSync・GiracleNav)"
-  grep -E " (GiracleSend|Outbox|GiracleWs|GiracleSync|GiracleNav) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan|send|upgrade)" "$OUT/logcat.txt" | tail -n 400
+  grep -E " (GiracleSend|Outbox|GiracleWs|GiracleSync|GiracleNav|GiracleUpdate) *: |TestRunner: (started|finished)|GiracleE2E: E2E-RESULT (offline|outbox|lan|send|upgrade)" "$OUT/logcat.txt" | tail -n 400
   echo "::endgroup::"
   echo "::group::プッシュ通知の受信 (UnifiedPush・Play 開発者サービス)"
   # Couldn't register / Missing registration id: 組み込みの配信が Play 開発者サービスから受けた失敗の理由 (タグは R8 で短くなる。#93)
@@ -244,6 +262,15 @@ if [ $status = 0 ] && [ -n "$LAN_SERVER" ] && ! grep -q "E2E-RESULT offline_star
   echo "::error::電波が無いときの起動の確認 (offlineColdStart) が最後まで動いていない (飛ばされた?)"
   status=1
 fi
+if [ $status = 0 ] && [ -n "$UPDATE_FEED_PORT" ] && ! grep -q "E2E-RESULT update_notice=done" "$OUT/logcat.txt"; then
+  echo "::error::新しい版の知らせの確認 (#147) が最後まで動いていない (飛ばされた?)"
+  status=1
+fi
+# 新しい版の確認の記録 (#147)。通ったときも出す (偽の応答への問い合わせが何回あったか)
+echo "::group::新しい版の確認 (GiracleUpdate・偽の応答)"
+grep -E " GiracleUpdate *: " "$OUT/logcat.txt" | tail -n 20
+[ -n "$UPDATE_FEED_PORT" ] && tail -n 20 "$OUT/update-feed.log"
+echo "::endgroup::"
 # 送信がサーバーで見つからなかった回の、その後の行方 (#94)。遅れて届いたか・本文が違うものが届いたか・無いままか
 if grep -q "E2E-RESULT send_server" "$OUT/logcat.txt"; then
   echo "::warning::送信がサーバーで見つからなかった (#94)。$(grep -oE 'E2E-RESULT send_server .*' "$OUT/logcat.txt" | head -1)"

@@ -35,6 +35,8 @@ data class ClientSettings(
     val fontScale: Float = 1f,
     /** 壁紙から作った色 (Material You。Android 12 以降) を使う。既定は Web 版に近い白黒基調 */
     val dynamicColor: Boolean = false,
+    /** 新しい版を GitHub に確かめて知らせる (#147、D-086) */
+    val checkUpdates: Boolean = true,
 )
 
 /**

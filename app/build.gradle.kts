@@ -12,6 +12,12 @@ val keystoreProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// 新しい版の確認の問い合わせ先 (#147、D-086)。-Pgiracle.updateCheckUrl=... で替えられる。空にすると機能ごと無効になる
+// (e2e は偽の応答を、ベンチマークは空を渡す)。debug と nonMinifiedRelease (Baseline Profile の記録用) は常に無効
+val updateCheckUrl: String = (findProperty("giracle.updateCheckUrl") as String?)
+    ?: "https://api.github.com/repos/1an28/giracle-frontend-kotlin/releases/latest"
+require('"' !in updateCheckUrl && '\\' !in updateCheckUrl) { "giracle.updateCheckUrl に \" と \\ は使えない" }
+
 android {
     namespace = "com.giracle.android"
     compileSdk = 37
@@ -25,6 +31,7 @@ android {
         versionCode = 22
         versionName = "0.9.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "UPDATE_CHECK_URL", "\"$updateCheckUrl\"")
     }
 
     signingConfigs {
@@ -53,10 +60,12 @@ android {
             isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += "release"
+            buildConfigField("String", "UPDATE_CHECK_URL", "\"\"")
         }
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            buildConfigField("String", "UPDATE_CHECK_URL", "\"\"")
         }
     }
 

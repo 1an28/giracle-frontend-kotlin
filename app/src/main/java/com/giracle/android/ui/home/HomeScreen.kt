@@ -92,6 +92,9 @@ fun HomeScreen(loading: Boolean, showConnection: Boolean = true) {
     val muted by store.mutedChannels.collectAsStateWithLifecycle()
     val roles by store.roles.collectAsStateWithLifecycle()
     val connection by com.giracle.android.ui.common.rememberConnectionNotice(graph.ws)
+    val updateState by graph.updates.state.collectAsStateWithLifecycle()
+    val settings by graph.prefs.settings.collectAsStateWithLifecycle()
+    val newVersion = graph.updates.noticeFor(updateState, settings.checkUpdates)
     var reorder by rememberSaveable { mutableStateOf(false) }
     var confirmReadAll by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -151,6 +154,12 @@ fun HomeScreen(loading: Boolean, showConnection: Boolean = true) {
                 // 切れてすぐには出さない (ちらつかせない)。チャンネルの画面と同じ知らせを使う (D-073)
                 else if (showConnection) connection.label?.let { label ->
                     Text(label, Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp).testTag(TestTags.CONNECTION_NOTICE), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            // 新しい版の知らせ (#147、D-086)
+            newVersion?.let { v ->
+                item(key = "update", contentType = "update") {
+                    com.giracle.android.ui.common.UpdateNoticeRow(v) { graph.updates.dismiss(v.version) }
                 }
             }
             // 他のアプリから共有されたものがあるとき、送り先のチャンネルを選んでもらう (D-020)
