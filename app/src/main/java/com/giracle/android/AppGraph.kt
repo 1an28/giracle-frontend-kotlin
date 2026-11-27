@@ -89,6 +89,22 @@ class AppGraph(context: Context) {
         }
     })
 
+    /**
+     * 新しい版の確認 (#147、D-086)。Giracle サーバー用の [http] は使わない (GitHub に Giracle の認証情報を送らない)。
+     * 状態は別の保存先に置く (ログアウトしても消さない)
+     */
+    val updates = com.giracle.android.data.UpdateChecker(
+        url = BuildConfig.UPDATE_CHECK_URL,
+        currentVersion = BuildConfig.VERSION_NAME,
+        store = object : com.giracle.android.data.UpdateChecker.Store {
+            private val sp by lazy { appContext.getSharedPreferences("giracle_update", Context.MODE_PRIVATE) }
+            override fun read(): String? = sp.getString("state", null)
+            override fun write(json: String) { sp.edit().putString("state", json).apply() }
+        },
+        scope = scope,
+        enabledSetting = { prefs.settings.value.checkUpdates },
+    )
+
     /** 電波が無くて送れなかったメッセージ (#30、D-029) */
     val outbox = com.giracle.android.data.Outbox(File(appContext.filesDir, "outbox.json"))
 

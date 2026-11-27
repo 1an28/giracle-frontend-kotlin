@@ -39,9 +39,10 @@ jobs:
       - name: Install SDK packages
         run: .github/scripts/sdk-install.sh
       # 比較用に、今の (ワイルドカード規則の) Baseline Profile で配布版を作っておく
+      # 新しい版の確認 (#147、D-086) は空にして切る (計測の間に GitHub へ問い合わせない)。nonMinifiedRelease は常に切れている
       - name: Build APKs
         run: |
-          ./gradlew :app:assembleNonMinifiedRelease :app:assembleRelease :baselineprofile:assembleDebug
+          ./gradlew :app:assembleNonMinifiedRelease :app:assembleRelease :baselineprofile:assembleDebug -Pgiracle.updateCheckUrl=
           mkdir -p apks && cp app/build/outputs/apk/release/app-release.apk apks/before.apk
       - uses: ./.github/actions/local-server
       - name: Start emulator
@@ -52,7 +53,7 @@ jobs:
         run: .github/scripts/baseline-profile.sh generate app/build/outputs/apk/nonMinifiedRelease/app-nonMinifiedRelease.apk
       - name: Build release APK with the recorded profile
         run: |
-          ./gradlew :app:assembleRelease && cp app/build/outputs/apk/release/app-release.apk apks/after.apk
+          ./gradlew :app:assembleRelease -Pgiracle.updateCheckUrl= && cp app/build/outputs/apk/release/app-release.apk apks/after.apk
           # 配布版の大きさの変化 (記録した Baseline Profile は APK に入る)
           ls -l apks/
       - name: Measure startup (before)

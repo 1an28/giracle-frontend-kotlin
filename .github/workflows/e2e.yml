@@ -67,9 +67,10 @@ jobs:
         with:
           path: prev-apk/
           key: e2e-prev-${{ steps.prev.outputs.tag }}-v2
-      # 配布版は debug 鍵で署名する (R8 の処理は本物の配布版と同じ。鍵は Secrets を使わない)
+      # 配布版は debug 鍵で署名する (R8 の処理は本物の配布版と同じ。鍵は Secrets を使わない)。
+      # 新しい版の確認 (#147、D-086) は GitHub ではなく、e2e-run.sh がランナーに立てる偽の応答 (adb reverse の localhost:3335) に問い合わせる
       - name: Build release APK and e2e APK
-        run: ./gradlew :app:assembleRelease :e2e:assembleDebug
+        run: ./gradlew :app:assembleRelease :e2e:assembleDebug -Pgiracle.updateCheckUrl=http://localhost:3335/latest.json
       - uses: ./.github/actions/local-server
       - name: Start emulator
         timeout-minutes: 15

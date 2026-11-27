@@ -53,6 +53,9 @@ object TestTags {
     fun homeChannelDrag(channelId: String) = "home.channel_drag:$channelId"
     const val HOME_REORDER = "home.reorder"
     const val HOME_SEARCH = "home.search"
+    /** 新しい版の知らせ (#147)。押すとリリースのページを開く */
+    const val HOME_UPDATE_NOTICE = "home.update_notice"
+    const val HOME_UPDATE_DISMISS = "home.update_dismiss"
 
     // 通知 (受信箱) と検索
     fun inboxItem(messageId: String) = "inbox.item:$messageId"
@@ -92,6 +95,10 @@ object TestTags {
     const val SETTINGS_KEEP_CONNECTION = "settings.keep_connection"
     const val SETTINGS_PUSH_STATUS = "settings.push_status"
     const val SETTINGS_PUSH_ENABLE = "settings.push_enable"
+    /** 新しい版の確認 (#147): 結果の行・今すぐ確かめる・切り替え */
+    const val SETTINGS_UPDATE_STATUS = "settings.update_status"
+    const val SETTINGS_UPDATE_CHECK_NOW = "settings.update_check_now"
+    const val SETTINGS_CHECK_UPDATES = "settings.check_updates"
 
     // メッセージの操作 (長押しで出るシート) と絵文字ピッカー
     const val MESSAGE_ACTIONS = "message_actions"
