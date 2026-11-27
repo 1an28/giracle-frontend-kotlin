@@ -368,7 +368,7 @@ private fun ColumnScope.AppTab() {
     val server by LocalStore.current.serverConfig.collectAsStateWithLifecycle()
     Text("接続先: ${graph.prefs.serverUrl}", style = MaterialTheme.typography.bodyMedium)
     Text("サーバー: ${server.name}")
-    Text("アプリ: Giracle Native ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
+    com.giracle.android.ui.common.UpdateSettingsSection(BuildConfig.VERSION_NAME)
     OutlinedButton(onClick = {
         val loader = coil3.SingletonImageLoader.get(graph.appContext)
         loader.memoryCache?.clear(); loader.diskCache?.clear()

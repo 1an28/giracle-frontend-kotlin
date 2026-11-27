@@ -52,6 +52,8 @@ class GiracleApp : Application(), SingletonImageLoader.Factory {
                 graph.retryLoadIfFailed()
                 // 背面で切断していた場合はつなぎ直す (再接続後に取りこぼしを取り直す)
                 if (graph.phase.value is AppPhase.SignedIn) graph.ws.start()
+                // 新しい版の確認 (#147)。間隔が空いていなければ何もしない。通信と保存は裏で行う
+                graph.updates.onForeground()
             }
 
             override fun onStop(owner: LifecycleOwner) {

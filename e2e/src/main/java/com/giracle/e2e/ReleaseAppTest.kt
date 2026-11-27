@@ -37,6 +37,7 @@ import java.util.regex.Pattern
  *               (既定 server / fast。e2e-run.sh が遅延の中継を通した遅い回線 (slow) でも測る。D-046)
  *   upgradePhase  上書き更新の確認 (upgradeBefore / upgradeAfter、D-075 の 3) の段階 (before / after)。無ければその 2 つを飛ばす
  *   prevVersion  上書きする前の版の名前 (ログに付けるだけ)
+ *   updateVersion  新しい版の確認 (#147) の偽の応答が返す版。指定したときだけ、ホームに知らせが出ることを確かめる
  *
  * 1 つの流れにしてあるのは、ログイン → チャンネル → 背面 → 設定 と、前の段階の状態を引き継ぐため。
  * 各段階の画面を [shots] に保存する (CI が取り出して成果物にする)。
@@ -56,6 +57,7 @@ class ReleaseAppTest {
     private val adminPass = args.getString("adminPass") ?: "password123"
     private val upgradePhase = args.getString("upgradePhase")
     private val prevVersion = args.getString("prevVersion") ?: "?"
+    private val updateVersion = args.getString("updateVersion")
     private val shots = File(instr.targetContext.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
     private var suffix = System.currentTimeMillis().toString().takeLast(6)
     /** 上書き更新の確認で、前の段階 (upgradeBefore) から引き継ぐもの (チャンネルと識別子)。確認用 APK は入れ直さないので、その中に置く */
@@ -103,6 +105,20 @@ class ReleaseAppTest {
     @Test fun releaseBuildWorksEndToEnd() {
         // 1〜3. まっさらな状態から起動し、ログインして通知の権限を許可する
         freshLogin()
+
+        // 3b. 新しい版の知らせ (#147、D-086)。R8 を通した配布版で、偽の応答 (e2e-run.sh) の JSON を読めて、ホームに出る。
+        //     閉じたら消える (後の操作の邪魔をしないよう、ここで閉じる)
+        if (updateVersion != null) {
+            val notice = wait(res("home.update_notice"), 20_000, "新しい版の知らせ")
+            // 押せる行は文字をまとめて持つことがあるので、行そのものと中の要素の両方を見る
+            val text = (listOf(notice.text) + notice.findObjects(By.textContains("v$updateVersion")).map { it.text })
+                .firstOrNull { it?.contains("v$updateVersion") == true }
+            if (text == null) fail("新しい版の知らせに v$updateVersion が出ていない")
+            shot("update_notice")
+            wait(res("home.update_dismiss"), 5_000, "知らせを閉じるボタン").click()
+            if (!device.wait(Until.gone(res("home.update_notice")), 5_000)) fail("閉じた新しい版の知らせが消えない")
+            Log.i(TAG, "E2E-RESULT update_notice=done text=$text")
+        }
 
         // 4. チャンネルを開く
         findScrolling(res("home.channel:$channelId"), "確認用チャンネル").click()
