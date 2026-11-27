@@ -28,8 +28,8 @@ android {
         applicationId = "io.github.u1an28.giracle.kotlin"
         minSdk = 26
         targetSdk = 37
-        versionCode = 22
-        versionName = "0.9.3"
+        versionCode = 23
+        versionName = "0.9.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "UPDATE_CHECK_URL", "\"$updateCheckUrl\"")
     }
