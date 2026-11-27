@@ -6,6 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -203,6 +205,39 @@ class UpdateCheckerTest {
         c.checkIfDue()
         assertEquals("0.9.4", c.noticeFor(c.state.value, enabled = true)!!.version)
         assertNull(c.noticeFor(c.state.value, enabled = false))
+    }
+
+    /** 「今すぐ確かめる」を途中で取り消しても (画面を離れた)、失敗として保存しない */
+    @Test fun cancelledCheckKeepsState() = runBlocking {
+        server.enqueue(release("v0.9.4"))
+        val c = checker()
+        c.checkIfDue()
+        val before = c.state.value
+        val saved = store.json
+        server.enqueue(MockResponse.Builder().headersDelay(10, TimeUnit.SECONDS).body("{}").build())
+        val job = launch(Dispatchers.IO) { c.checkNow() }
+        waitUntil { server.requestCount == 2 }
+        job.cancelAndJoin()
+        assertEquals(before, c.state.value)
+        assertEquals(saved, store.json)
+        assertFalse(c.checking.value)
+        // 次の自動の確認も、直前の成功から 24 時間の扱いのまま
+        assertFalse(c.checkIfDue())
+    }
+
+    /** 閉じたら、確認の最中 (ロックを待つ間) でもすぐ消える */
+    @Test fun dismissHidesImmediatelyWhileChecking() = runBlocking {
+        server.enqueue(release("v0.9.4"))
+        val c = checker()
+        c.checkIfDue()
+        server.enqueue(MockResponse.Builder().headersDelay(3, TimeUnit.SECONDS).body("{}").build())
+        val job = launch(Dispatchers.IO) { c.checkNow() }
+        waitUntil { server.requestCount == 2 }
+        c.dismiss("0.9.4")
+        assertNull(c.notice())
+        job.join()
+        assertNull(c.notice())
+        waitUntil { store.json?.contains("\"dismissedVersion\":\"0.9.4\"") == true }
     }
 
     @Test fun checkNowIgnoresInterval() = runBlocking {

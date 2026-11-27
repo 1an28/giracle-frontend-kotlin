@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -94,9 +95,12 @@ class UpdateChecker(
         true
     }
 
-    /** 設定の「今すぐ確かめる」。間隔を見ずに確かめる (設定の切り替えが切れていても) */
-    suspend fun checkNow() {
-        if (!available) return
+    /**
+     * 設定の「今すぐ確かめる」。間隔を見ずに確かめる (設定の切り替えが切れていても)。
+     * 画面の scope (メインスレッド) から呼ばれるので、保存の読み書きも含めて裏のスレッドで行う
+     */
+    suspend fun checkNow() = withContext(Dispatchers.IO) {
+        if (!available) return@withContext
         _checking.value = true
         try {
             mutex.withLock {
@@ -108,10 +112,15 @@ class UpdateChecker(
         }
     }
 
-    /** ホームの知らせを閉じる。その版では二度と出さない */
+    /**
+     * ホームの知らせを閉じる。その版では二度と出さない。
+     * 表示はすぐ消す (確認の最中でロックを待っていても)。保存だけロックの中で行う
+     */
     fun dismiss(version: String) {
+        _state.update { it.copy(dismissedVersion = version) }
         scope.launch(Dispatchers.IO) {
             mutex.withLock {
+                // 保存したものをまだ読んでいなければ、読んだうえで閉じた版を重ねる
                 ensureLoaded()
                 save(_state.value.copy(dismissedVersion = version))
             }
@@ -141,9 +150,15 @@ class UpdateChecker(
 
     private suspend fun fetchLocked() {
         val t = now()
-        val release = runCatching { fetch() }
-            .onFailure { android.util.Log.i(TAG, "check failed: ${it.javaClass.simpleName} ${it.message}") }
-            .getOrNull()
+        val release = try {
+            fetch()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 取り消し (画面を離れたなど) は失敗ではない。何も保存しない (直前の成功を「確かめられませんでした」で上書きしない)
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.i(TAG, "check failed: ${e.javaClass.simpleName} ${e.message}")
+            null
+        }
         val prev = _state.value
         save(
             if (release == null) prev.copy(checkedAt = t, lastOk = false)
