@@ -20,7 +20,10 @@ require('"' !in updateCheckUrl && '\\' !in updateCheckUrl) { "giracle.updateChec
 
 android {
     namespace = "com.giracle.android"
-    compileSdk = 37
+    // Compose 1.13 (BOM 2026.11.01) が 37.1 以上を求める。targetSdk は 37 のまま (D-088)
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
 
     defaultConfig {
         // 持ち主 (GitHub: 1an28) の名前空間にする (D-015)。各部分は英字で始める決まりがあるので先頭に u を付ける。
@@ -137,7 +140,7 @@ dependencies {
 // Gradle で取得してオフラインモードで使う。
 val robolectricRuntime: Configuration = configurations.create("robolectricRuntime")
 dependencies {
-    robolectricRuntime("org.robolectric:android-all-instrumented:15-robolectric-13954326-i7")
+    robolectricRuntime("org.robolectric:android-all-instrumented:15-robolectric-14663667-2-i7")
 }
 val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
 val copyRobolectricDeps = tasks.register<Copy>("copyRobolectricDeps") {

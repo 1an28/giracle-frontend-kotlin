@@ -1687,3 +1687,16 @@
   CLAUDE.md は 1 行に、DEVELOPMENT.md の「PR を作る前に」は前提と PR の本文のことだけに縮めた。手順の細目 (手元のテストの範囲・CI の後の直し) は書かず、そのときに決める。
   最初は子の流れを D-067 に戻して軽くする案を出したが、点検役の「効く場所で D-087 が無くなる」という指摘で取り下げた。上の「判断」の手順の細目は、この縮めた形に置き換える
 
+
+## D-088 compileSdk を 37.2 にする (Compose BOM 2026.11.01 のため。targetSdk は 37 のまま)
+
+- **きっかけ**: 依存の版上げ (2026-11-28) で Compose BOM を 2026.09.00 → 2026.11.01 (Compose 1.13.0) にしたら、ビルドが
+  「`androidx.compose.ui:ui-android:1.13.0` などは compileSdk 37.1 以上を求める」で止まった
+- **確かめたこと**: Compose ui / foundation 1.13.0-alpha03 のリリースノートに、ライブラリの compileSdk を 37.1 にしたとある (読んだのは一部、子セッションの調べ)。
+  SDK の一覧 (`sdkmanager --list`) に安定版の `platforms;android-37.1` と `android-37.2` がある (37.2 は beta も並ぶが、`android-37.2` は安定版)
+- **判断**: app の compileSdk を `release(37) { minorApiLevel = 2 }` (37.2、一番新しい安定版) にする。targetSdk (動作が変わる) と minSdk は変えない。
+  e2e と baselineprofile はそのまま 37 (Compose を使わない。baselineprofile/ は触らない)。CI (`sdk-install.sh`) と作業場所 (`devtools/cloud-setup.sh`) で 37.2 も入れる
+  (37.0 は e2e・baselineprofile と、前の版を作る `e2e-build-prev.sh` が使うので残す)
+- **代わりの案**: BOM を 2026.09.00 に据え置く (Compose の修正が入らない)。37.1 にする (37.2 を避ける理由が見つからない)
+- **確かめていないこと**: 作業場所の準備の手順 (環境に保存された正本) は直していない (リポジトリの控えだけ直した)。正本を直すまで、新しい会話では 37.2 が無く、
+  AGP が自分で取りに行くかは確かめていない
