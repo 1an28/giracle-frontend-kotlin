@@ -271,6 +271,29 @@ echo "::group::新しい版の確認 (GiracleUpdate・偽の応答)"
 grep -E " GiracleUpdate *: " "$OUT/logcat.txt" | tail -n 20
 [ -n "$UPDATE_FEED_PORT" ] && tail -n 20 "$OUT/update-feed.log"
 echo "::endgroup::"
+# 権限の確認画面の「許可」を押しても閉じなかった回 (#126)。通ったとき (押し直して閉じた) も出す。
+# テストが logcat に書く PERM-CLUE begin / end の印の間から、押し直した回 (attempts=2 以上) と閉じられなかった回 (ok=false) だけ、
+# 権限の画面のプロセス (begin の pc_pid) の行と、窓・入力・画面遷移に関わるタグの行を出す
+if grep -q "E2E-RESULT permission_tap_stuck" "$OUT/logcat.txt"; then
+  echo "::warning::権限の確認画面の「許可」を押しても閉じない回があった (#126)。$(grep -oE 'E2E-RESULT permission_tap_stuck .*' "$OUT/logcat.txt" | head -1)"
+fi
+echo "::group::権限の確認画面を押しても閉じなかった回の記録 (PERM-CLUE、#126)"
+awk -v tags=' (GiracleE2E|TestRunner|ActivityTaskManager|ActivityManager|WindowManager|InputDispatcher|InputReader|InputManager|ViewRootImpl|PermissionController[A-Za-z]*|GrantPermissions[A-Za-z]*) *: |permissioncontroller' '
+  function flush(note) { print buf; if (note != "") print note; print "----" }
+  /GiracleE2E: PERM-CLUE begin/ {
+    if (inwin && stuck) flush("(終わりの印が無い。途中で例外が出た可能性)")
+    inwin = 1; stuck = 0; buf = $0; split("", pids)
+    if (match($0, /pc_pid=.*/)) { m = split(substr($0, RSTART + 7), a, " "); for (i = 1; i <= m; i++) pids[a[i]] = 1 }
+    next
+  }
+  /GiracleE2E: PERM-CLUE end/ {
+    if (inwin && ($0 ~ /ok=false/ || $0 ~ /attempts=[2-9]/)) { buf = buf "\n" $0; flush("") }
+    inwin = 0; next
+  }
+  inwin && ($0 ~ tags || ($3 in pids)) { buf = buf "\n" $0; if ($0 ~ /E2E-RESULT permission_tap_stuck/) stuck = 1 }
+  END { if (inwin && stuck) flush("(終わりの印が無い。途中で例外が出た可能性)") }
+' "$OUT/logcat.txt" | head -n 1500
+echo "::endgroup::"
 # 送信がサーバーで見つからなかった回の、その後の行方 (#94)。遅れて届いたか・本文が違うものが届いたか・無いままか
 if grep -q "E2E-RESULT send_server" "$OUT/logcat.txt"; then
   echo "::warning::送信がサーバーで見つからなかった (#94)。$(grep -oE 'E2E-RESULT send_server .*' "$OUT/logcat.txt" | head -1)"

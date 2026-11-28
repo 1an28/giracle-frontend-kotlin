@@ -971,15 +971,62 @@ class ReleaseAppTest {
      * 落ち着くのを待ってから押し、閉じたことを確かめる。閉じられたら true
      */
     private fun clickAllowSettled(): Boolean {
-        repeat(3) {
-            device.waitForIdle()
-            SystemClock.sleep(800)
-            val b = device.findObject(ALLOW_BUTTON) ?: return true
-            b.click()
-            if (device.wait(Until.gone(ALLOW_BUTTON), 5_000)) return true
+        // #126: 押しても閉じない回の原因を確かめるため、logcat に始まりと終わりの印を書く (PERM-CLUE)。
+        // e2e-run.sh が、押し直した回・閉じられなかった回だけ、印の間のシステムの記録 (権限の画面のプロセス・
+        // ActivityTaskManager・WindowManager・InputDispatcher など) を CI のログに出す
+        val id = "${testName.methodName}-${++permClueSeq}"
+        val pcPids = listOf("com.google.android.permissioncontroller", "com.android.permissioncontroller")
+            .joinToString(" ") { shell("pidof $it").trim() }.trim()
+        Log.i(TAG, "PERM-CLUE begin id=$id at=${clock()} pc_pid=$pcPids")
+        var attempts = 0
+        val ok = run {
+            repeat(3) { i ->
+                device.waitForIdle()
+                SystemClock.sleep(800)
+                val b = device.findObject(ALLOW_BUTTON) ?: return@run true
+                attempts = i + 1
+                // 押す前の状態。押すのは b.click() (visibleBounds の中心)
+                val before = runCatching {
+                    "bounds=${b.visibleBounds} enabled=${b.isEnabled} clickable=${b.isClickable} pkg=${b.applicationPackage} " +
+                        "matches=${device.findObjects(ALLOW_BUTTON).size}"
+                }.getOrElse { "error=${it.javaClass.simpleName}" }
+                val tapAt = clock()
+                b.click()
+                val goneStart = SystemClock.uptimeMillis()
+                if (device.wait(Until.gone(ALLOW_BUTTON), 5_000)) return@run true
+                // 5 秒たっても残っている。同じ確認画面か (文言)・押せる状態か・何が前面か を残す
+                val after = device.findObject(ALLOW_BUTTON)
+                val afterDesc = runCatching { "bounds=${after?.visibleBounds} enabled=${after?.isEnabled}" }.getOrElse { "gone_now" }
+                val msg = device.findObject(By.res(Pattern.compile(".*:id/permission_message")))?.text?.visible()
+                Log.w(
+                    TAG,
+                    "E2E-RESULT permission_tap_stuck id=$id attempt=${i + 1} tap_at=$tapAt waited_ms=${SystemClock.uptimeMillis() - goneStart} " +
+                        "before=[$before] after=[$afterDesc] message=$msg",
+                )
+                logWindows(id)
+                dumpUi("権限の確認画面が押しても閉じない (id=$id attempt=${i + 1})")
+            }
+            device.findObject(ALLOW_BUTTON) == null
         }
-        return device.findObject(ALLOW_BUTTON) == null
+        if (!ok) shot("permission_stuck")
+        Log.i(TAG, "PERM-CLUE end id=$id at=${clock()} ok=$ok attempts=$attempts")
+        return ok
     }
+
+    /** 前面の窓と、見えている窓の一覧 (権限の確認画面の上に別の窓が重なっていないかを見るため。#126) */
+    private fun logWindows(id: String) {
+        runCatching {
+            shell("dumpsys window").lines()
+                .filter { "mCurrentFocus" in it || "mFocusedApp" in it || "mObscuringWindow" in it }
+                .take(10).forEach { Log.w(TAG, "PERM-CLUE window id=$id ${it.trim()}") }
+            shell("dumpsys window visible").lines()
+                .filter { it.trimStart().startsWith("Window #") }
+                .take(30).forEach { Log.w(TAG, "PERM-CLUE window id=$id visible ${it.trim()}") }
+        }
+    }
+
+    /** 端末の時計 (logcat の行の時刻と突き合わせる) */
+    private fun clock(): String = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
 
     /** 一覧を送りながら探す (画面の外にある行・タブ用) */
     private fun findScrolling(sel: BySelector, what: String): UiObject2 {
@@ -1116,6 +1163,8 @@ class ReleaseAppTest {
 
     companion object {
         private const val TAG = "GiracleE2E"
+        /** PERM-CLUE の印の通し番号 (同じ実行の中のテストをまたいで重ならないように) */
+        private var permClueSeq = 0
         /** アプリの SendTrace のタグ (#70) */
         private const val PERF_TAG = "GiraclePerf"
         private val ALLOW_BUTTON: BySelector = By.res(Pattern.compile(".*:id/permission_allow_button"))
