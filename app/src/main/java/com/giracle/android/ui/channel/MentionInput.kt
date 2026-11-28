@@ -22,19 +22,37 @@ import androidx.compose.ui.text.TextRange
  * メンションの外 (前後の端を含む) での変換は、何も変えずに通す。
  */
 
-/** 入力欄の本文の中の、名前の分かっているメンション 1 つ。[start]..[end] は本文 (`@<id>`) での位置 */
-internal data class MentionSpan(val start: Int, val end: Int, val name: String)
+/**
+ * 入力欄の本文の中の、名前の分かっているメンション 1 つ。[start]..[end] は本文 (`@<id>`・`#<id>`) での位置。
+ * [prefix] は `@` (利用者) か `#` (チャンネル。Web 版 PR #252 に合わせて同じ扱いにした、D-088)
+ */
+internal data class MentionSpan(val start: Int, val end: Int, val name: String, val prefix: Char = '@')
 
-/** 受け取ったメッセージの描画 (MessageParser) と同じ形 */
+/** 受け取ったメッセージの描画 (MessageParser・ChatStore.plainText) と同じ形 */
 private val MENTION = Regex("""@<([a-zA-Z0-9-]+)>""")
+private val MENTION_OR_CHANNEL = Regex("""([@#])<([a-zA-Z0-9-]+)>""")
 
-/** 本文の中のメンションのうち、名前の分かるものを返す。名前が分からない id は `@<id>` のまま見せるので含めない */
-internal fun findMentions(text: CharSequence, nameOf: (String) -> String?): List<MentionSpan> {
-    if (!text.contains("@<")) return emptyList()
-    return MENTION.findAll(text).mapNotNull { m ->
-        nameOf(m.groupValues[1])?.let { MentionSpan(m.range.first, m.range.last + 1, it) }
+/**
+ * 本文の中のメンションのうち、名前の分かるものを返す。名前が分からない id は `@<id>`・`#<id>` のまま見せるので含めない。
+ * [nameOf] は利用者の名前、[channelNameOf] はチャンネルの名前を引く
+ */
+internal fun findMentions(
+    text: CharSequence,
+    nameOf: (String) -> String?,
+    channelNameOf: (String) -> String? = { null },
+): List<MentionSpan> {
+    if (!text.contains("@<") && !text.contains("#<")) return emptyList()
+    return MENTION_OR_CHANNEL.findAll(text).mapNotNull { m ->
+        val prefix = m.groupValues[1][0]
+        val id = m.groupValues[2]
+        val name = if (prefix == '@') nameOf(id) else channelNameOf(id)
+        name?.let { MentionSpan(m.range.first, m.range.last + 1, it, prefix) }
     }.toList()
 }
+
+/** 本文に含まれるメンションとチャンネルへの参照 (`@<id>`・`#<id>` の形のまま)。名前が変わったかを見るため */
+internal fun mentionTokens(text: CharSequence): Set<String> =
+    if (!text.contains("@<") && !text.contains("#<")) emptySet() else MENTION_OR_CHANNEL.findAll(text).map { it.value }.toSet()
 
 /** 本文に含まれるメンションの id (名前を取りに行くため) */
 internal fun mentionIds(text: CharSequence): Set<String> =
@@ -149,7 +167,7 @@ internal fun repairEdit(
     val token = original.substring(t.start, t.end)
     val left = original.substring(start, t.start) // メンションより前の、置き換えた範囲
     val right = original.substring(t.end, end) // メンションより後の、置き換えた範囲
-    for (label in listOf("@" + t.name, t.name)) {
+    for (label in listOf(t.prefix + t.name, t.name)) {
         val i = inserted.indexOf(label, ignoreCase = true)
         if (i >= 0) {
             val text = inserted.substring(0, i) + token + inserted.substring(i + label.length)
@@ -157,7 +175,7 @@ internal fun repairEdit(
         }
     }
     // IME から見えていた文字 (置き換えた範囲の表示)
-    val label = "@" + t.name
+    val label = t.prefix + t.name
     val bodyLen = t.end - t.start - 1
     val seenLabel = label.substring(
         labelOffset(maxOf(oMin, t.start) - t.start, t.name.length, bodyLen),
@@ -180,10 +198,14 @@ internal fun repairEdit(
 // 編集の範囲 (TextFieldBuffer.changes) が実験的な API のため
 @OptIn(ExperimentalFoundationApi::class)
 @Stable
-internal class MentionTransformations(private val nameOf: (String) -> String?, private val style: SpanStyle) {
+internal class MentionTransformations(
+    private val nameOf: (String) -> String?,
+    private val style: SpanStyle,
+    private val channelNameOf: (String) -> String? = { null },
+) {
 
     val output = OutputTransformation {
-        val mentions = findMentions(asCharSequence(), nameOf)
+        val mentions = findMentions(asCharSequence(), nameOf, channelNameOf)
         // 後ろから置き換えて、前の位置をずらさない
         for (m in mentions.asReversed()) {
             replaceCharByChar(m.start + 1, m.end, m.name)
@@ -195,7 +217,7 @@ internal class MentionTransformations(private val nameOf: (String) -> String?, p
 
     private fun fixMentions(buf: TextFieldBuffer) {
         val before = buf.originalText
-        val mentions = findMentions(before, nameOf)
+        val mentions = findMentions(before, nameOf, channelNameOf)
         if (mentions.isEmpty()) return
         val changes = buf.changes
         if (changes.changeCount == 0) {
@@ -218,7 +240,7 @@ internal class MentionTransformations(private val nameOf: (String) -> String?, p
         val repair = repairEdit(before, oMin, oMax, inserted, mentions, cursorEdit = buf.originalSelection.collapsed)
         if (repair == null) {
             // 本文は直さない。選択がメンションの中に入っていれば端へ寄せる (編集の後の本文で探す)
-            val after = findMentions(buf.asCharSequence(), nameOf)
+            val after = findMentions(buf.asCharSequence(), nameOf, channelNameOf)
             val snapped = snapSelection(buf.originalSelection, buf.selection, after)
             if (snapped != buf.selection) buf.selection = snapped
             return
@@ -238,15 +260,17 @@ internal class MentionTransformations(private val nameOf: (String) -> String?, p
 internal fun OnMentionNamesChanged(
     state: androidx.compose.foundation.text.input.TextFieldState,
     nameOf: (String) -> String?,
+    channelNameOf: (String) -> String?,
     onChanged: () -> Unit,
 ) {
     val latest = androidx.compose.runtime.rememberUpdatedState(onChanged)
-    androidx.compose.runtime.LaunchedEffect(state, nameOf) {
+    androidx.compose.runtime.LaunchedEffect(state, nameOf, channelNameOf) {
         var prevIds: Set<String>? = null
         var prevNames: List<String?>? = null
         androidx.compose.runtime.snapshotFlow {
-            val ids = mentionIds(state.text)
-            ids to ids.map(nameOf)
+            val ids = mentionTokens(state.text)
+            // ids は `@<id>`・`#<id>`。先頭の 2 文字と最後の 1 文字を外すと id
+            ids to ids.map { t -> t.substring(2, t.length - 1).let { if (t[0] == '@') nameOf(it) else channelNameOf(it) } }
         }.collect { (ids, names) ->
             if (ids == prevIds && names != prevNames) latest.value()
             prevIds = ids

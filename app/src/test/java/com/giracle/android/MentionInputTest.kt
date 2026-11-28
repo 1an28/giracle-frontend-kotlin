@@ -122,11 +122,41 @@ class MentionInputTest {
         assertEquals(MentionRepair(ms, me, token, me), repairEdit(raw, ms + 1, me, "Taro", m2, true))
     }
 
+    // ---- チャンネルへの参照 `#<id>` (D-088) ----
+
+    private val chId = "0b6f6c2e-2222-4a2b-9c3d-000000000001"
+    private val channels = mapOf(chId to "一般")
+
+    @Test fun findsChannelsToo() {
+        val text = "見て #<$chId> と @<$id>"
+        assertEquals(
+            listOf(MentionSpan(3, 3 + 39, "一般", '#'), MentionSpan(3 + 39 + 3, 3 + 39 + 3 + 39, "太郎")),
+            findMentions(text, names::get, channels::get),
+        )
+        // チャンネルの名前を引かなければ (既定)、`#<id>` は見せ方を変えない
+        assertEquals(listOf(MentionSpan(3 + 39 + 3, 3 + 39 + 3 + 39, "太郎")), findMentions(text, names::get))
+    }
+
+    @Test fun showsChannelName() {
+        val state = setUp("見て #<$chId> ")
+        assertEquals("見て #一般 ", shown())
+        assertEquals("見て #<$chId> ", state.text.toString())
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun backspaceRemovesWholeChannel() {
+        val state = setUp("見て #<$chId>")
+        rule.onNodeWithTag("f").performClick()
+        rule.runOnIdle { state.edit { selection = TextRange(length) } }
+        rule.onNodeWithTag("f").performKeyInput { pressKey(Key.Backspace) }
+        rule.runOnIdle { assertEquals("見て ", state.text.toString()) }
+    }
+
     // ---- 実際の入力欄 ----
 
     private fun setUp(text: String = raw): TextFieldState {
         val state = TextFieldState(text, TextRange(text.length))
-        val t = MentionTransformations(names::get, androidx.compose.ui.text.SpanStyle(color = Color.Blue))
+        val t = MentionTransformations(names::get, androidx.compose.ui.text.SpanStyle(color = Color.Blue), channels::get)
         rule.setContent {
             BasicTextField(state, Modifier.testTag("f"), inputTransformation = t.input, outputTransformation = t.output)
         }
@@ -286,7 +316,7 @@ class MentionInputTest {
         rule.setContent {
             val t = remember { MentionTransformations(names::get, androidx.compose.ui.text.SpanStyle(color = Color.Blue)) }
             BasicTextField(state, Modifier.testTag("f"), inputTransformation = t.input, outputTransformation = t.output)
-            OnMentionNamesChanged(state, names::get) { changed++ }
+            OnMentionNamesChanged(state, names::get, { null }) { changed++ }
         }
         rule.onNodeWithTag("f").performClick()
         val ic = inputConnection()

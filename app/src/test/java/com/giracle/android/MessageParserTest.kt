@@ -3,9 +3,6 @@ package com.giracle.android
 import com.giracle.android.data.MessageParser
 import com.giracle.android.data.Segment
 import com.giracle.android.data.net.Endpoint
-import com.giracle.android.ui.channel.mentionQueryAt
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -50,12 +47,5 @@ class MessageParserTest {
         assertEquals("http://192.168.0.5:3333", e.originHeader)
         val d = Endpoint.parse("http://localhost:3000", direct = true)!!
         assertEquals("http://localhost:3000/", d.apiBase.toString())
-    }
-
-    @Test fun mentionQuery() {
-        assertEquals(0 to "ab", mentionQueryAt(TextFieldValue("@ab", TextRange(3))))
-        assertEquals(3 to "x", mentionQueryAt(TextFieldValue("hi @x", TextRange(5))))
-        assertNull(mentionQueryAt(TextFieldValue("mail@x", TextRange(6))))
-        assertNull(mentionQueryAt(TextFieldValue("@a b", TextRange(4))))
     }
 }

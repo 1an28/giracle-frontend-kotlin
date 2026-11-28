@@ -209,6 +209,40 @@ class UiScreenshotTest {
         back(TestTags.SCREEN_HOME)
     }
 
+    /** 入力欄で `#` はチャンネル、`:` はカスタム絵文字の候補を出す。選ぶと `#名前`・`:code:` が入る (Web 版 PR #252、D-088) */
+    @Test fun composerSuggestChannelAndEmoji() {
+        assumeTrue(server != null)
+        val ch = newChannel("suggest")
+        val name = runBlocking { fixture.channelInfo(ch) }.name
+        val code = "uit_" + System.currentTimeMillis().toString().takeLast(6)
+        val bmp = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(255, 160, 0)) }
+        val png = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        runBlocking { fixture.uploadCustomEmoji(code, UploadFile("e.png", "image/png", png.toRequestBody("image/png".toMediaType()))) }
+        try {
+            startApp()
+            click(TestTags.homeChannel(ch))
+            waitTag(TestTags.COMPOSER_INPUT)
+            fun shown() = rule.onNodeWithTag(TestTags.COMPOSER_INPUT).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text
+
+            click(TestTags.COMPOSER_INPUT)
+            rule.onNodeWithTag(TestTags.COMPOSER_INPUT).performTextInput("見て #" + name.take(9))
+            waitTag(TestTags.composerChannel(ch)); shot("08a_suggest_channel")
+            click(TestTags.composerChannel(ch))
+            rule.waitUntil(5_000) { shown() == "見て #$name " }
+
+            rule.onNodeWithTag(TestTags.COMPOSER_INPUT).performTextInput(":" + code.take(6))
+            waitTag(TestTags.composerEmoji(code)); shot("08b_suggest_emoji")
+            click(TestTags.composerEmoji(code))
+            rule.waitUntil(5_000) { shown() == "見て #$name :$code: " }
+            shot("08c_suggest_done")
+
+            click(TestTags.COMPOSER_SEND)
+            rule.waitUntil(10_000) { runBlocking { fixture.history(ch) }.history.any { it.content.startsWith("見て #<$ch> :$code:") } }
+        } finally {
+            runBlocking { runCatching { fixture.deleteCustomEmoji(code) } }
+        }
+    }
+
     /** 使っている途中でリアルタイム接続が切れたら、チャンネルの題名の下に出し、つながったら消す (D-073) */
     @Test fun connectionLostInChannel() {
         assumeTrue(server != null)
