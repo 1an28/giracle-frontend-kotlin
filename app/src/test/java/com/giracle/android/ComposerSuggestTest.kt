@@ -71,6 +71,9 @@ class ComposerSuggestTest {
         // 128 文字より長い語は出さない (窓の先頭で切れる)
         assertNull(at("#" + "a".repeat(200)))
         assertEquals(SuggestQuery(SuggestKind.CHANNEL, 1, "a".repeat(100)), at(" #" + "a".repeat(100)))
+        // 窓のちょうど手前が改行なら、行の始まりとして扱う
+        assertEquals(SuggestQuery(SuggestKind.CHANNEL, 201, "a".repeat(127)), at("x".repeat(200) + "\n#" + "a".repeat(127)))
+        assertNull(at("x".repeat(200) + " #" + "a".repeat(127)))
         assertNull(at(""))
     }
 

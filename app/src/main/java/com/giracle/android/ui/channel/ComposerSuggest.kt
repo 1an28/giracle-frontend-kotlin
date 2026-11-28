@@ -45,11 +45,12 @@ internal fun suggestQueryAt(text: CharSequence, selection: TextRange): SuggestQu
     if (!selection.collapsed) return null
     val end = selection.start
     if (end <= 0 || end > text.length) return null
-    // 行をまたがない (Web 版は段落の中だけを見る)
-    var lineStart = end
-    while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--
-    val start = maxOf(lineStart, end - WINDOW)
-    val truncated = start > lineStart
+    // 行をまたがない (Web 版は段落の中だけを見る)。改行の無い長い行でも、窓より前へは探しに行かない
+    val floor = maxOf(0, end - WINDOW)
+    var start = end
+    while (start > floor && text[start - 1] != '\n') start--
+    // 窓の先頭まで行の始まりが無かった = 行は窓より前から続いている (直前の文字が見えない)
+    val truncated = start == floor && floor > 0 && text[floor - 1] != '\n'
     val before = text.subSequence(start, end).toString()
     var best: SuggestQuery? = null
     var bestIndex = -1
