@@ -22,10 +22,11 @@ private const val WINDOW = 128
 /** 絵文字の候補を出す、`:` の後の最小の文字数 (Web 版は 0。D-088) */
 private const val EMOJI_MIN_QUERY = 2
 
-// `(?U)` で `\S` を Unicode の空白 (全角の空白など) でも切る (Web 版の JavaScript の `\S` と同じにする)
+// `[^\s\p{Z}]` = 空白でも Unicode の区切り文字 (全角の空白・NBSP など) でもない文字。Web 版の JavaScript の `\S` に近づける。
+// `(?U)` は使わない: Android の正規表現 (ICU) はインラインの `U` を受け付けず、配布版がチャンネルを開くと落ちた (JVM のテストでは通る。D-088)
 private val PATTERNS = listOf(
-    SuggestKind.USER to Regex("""(?U)@(\S*)$"""),
-    SuggestKind.CHANNEL to Regex("""(?U)#(\S*)$"""),
+    SuggestKind.USER to Regex("""@([^\s\p{Z}]*)$"""),
+    SuggestKind.CHANNEL to Regex("""#([^\s\p{Z}]*)$"""),
     // 絵文字のコードは英数字と `_+-` だけ
     SuggestKind.EMOJI to Regex(""":([A-Za-z0-9_+-]*)$"""),
 )
