@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -68,7 +69,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -242,15 +242,27 @@ fun Composer(
         }
     }
 
-    // ---- メンション候補 ----
-    val mentionQuery by remember(state) { derivedStateOf { mentionQueryAt(TextFieldValue(state.text.toString(), state.selection)) } }
+    // ---- 候補 (`@` 利用者・`#` チャンネル・`:` カスタム絵文字。D-088) ----
+    // 同じ語のあいだは作り直さない (打つたびに候補の一覧を組み直さないよう、等しければ知らせない)
+    val suggest by remember(state) { derivedStateOf(structuralEqualityPolicy()) { suggestQueryAt(state.text, state.selection) } }
     var candidates by remember { mutableStateOf<List<User>>(emptyList()) }
-    LaunchedEffect(mentionQuery) {
-        val q = mentionQuery?.second
-        if (q == null) { candidates = emptyList(); return@LaunchedEffect }
+    LaunchedEffect(suggest) {
+        val s = suggest
+        if (s?.kind != SuggestKind.USER) { candidates = emptyList(); return@LaunchedEffect }
         delay(200) // 入力ごとの API 呼び出しを避ける (Web 版と同じ 200ms)
-        candidates = runCatching { graph.api.userList(length = 20, username = q, joinedChannel = channelId) }.getOrDefault(emptyList())
+        // `@` だけのときは名前で絞らず、チャンネルの参加者を出す (Web 版と同じ)
+        candidates = runCatching { graph.api.userList(length = 20, username = s.query.ifEmpty { null }, joinedChannel = channelId) }.getOrDefault(emptyList())
         candidates.forEach(store::putUser)
+    }
+    // チャンネルと絵文字は手元の一覧から絞る (起動時に全部読み込んである)。一覧は候補の計算の中でだけ読み、
+    // 一覧が変わっても候補が変わらなければ Composer を作り直さない
+    val channelsState = store.channels.collectAsStateWithLifecycle()
+    val emojiState = store.customEmoji.collectAsStateWithLifecycle()
+    val channelCandidates by remember(channelsState) {
+        derivedStateOf(structuralEqualityPolicy()) { suggest?.takeIf { it.kind == SuggestKind.CHANNEL }?.let { filterChannels(channelsState.value, it.query) }.orEmpty() }
+    }
+    val emojiCandidates by remember(emojiState) {
+        derivedStateOf(structuralEqualityPolicy()) { suggest?.takeIf { it.kind == SuggestKind.EMOJI }?.let { filterEmojiCodes(emojiState.value, it.query) }.orEmpty() }
     }
 
     // 入力欄では `@<id>` を `@名前` で見せる (#143、D-081)。状態は `@<id>` のまま (送る本文・下書き・編集と同じ)。
@@ -259,14 +271,16 @@ fun Composer(
     // 見た目は履歴のメンション (MessageItem、自分以外宛て) と同じ
     val scheme = MaterialTheme.colorScheme
     val nameOf = remember(usersState) { { id: String -> usersState.value[id]?.name } }
-    val mentionTransform = remember(nameOf, scheme.surfaceVariant, scheme.onSurface) {
+    // `#<id>` も `#名前` で見せる (D-088)。チャンネルの表も変換の中でだけ読む
+    val channelNameOf = remember(channelsState) { { id: String -> channelsState.value.firstOrNull { it.id == id }?.name } }
+    val mentionTransform = remember(nameOf, channelNameOf, scheme.surfaceVariant, scheme.onSurface) {
         val style = androidx.compose.ui.text.SpanStyle(background = scheme.surfaceVariant, color = scheme.onSurface, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-        MentionTransformations(nameOf, style)
+        MentionTransformations(nameOf, style, channelNameOf)
     }
     // 名前が後から届いて表示が変わったら、入力中の IME に読み直させる (IME が古い表示の位置で編集しないように)
     val view = androidx.compose.ui.platform.LocalView.current
     val inputFocused = remember { booleanArrayOf(false) }
-    OnMentionNamesChanged(state, nameOf) {
+    OnMentionNamesChanged(state, nameOf, channelNameOf) {
         if (inputFocused[0]) view.context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.restartInput(view)
     }
     // 下書き・編集の本文にある人の名前を取りに行く (名前が届くまでは `@<id>` のまま見える)
@@ -274,13 +288,14 @@ fun Composer(
         snapshotFlow { mentionIds(state.text) }.collect { ids -> ids.forEach(store::ensureUser) }
     }
 
-    fun insertMention(u: User) {
-        val (start, _) = mentionQuery ?: return
+    /** 打ちかけの語 (トリガー文字から カーソルまで) を、選んだ候補に置き換える。押した時点の本文から語を探し直す */
+    fun insertSuggestion(kind: SuggestKind, value: String) {
+        val s = suggestQueryAt(state.text, state.selection)?.takeIf { it.kind == kind } ?: return
         val end = state.selection.start
-        val token = "@<${u.id}> "
+        val token = suggestToken(kind, value)
         state.edit {
-            replace(start, end, token)
-            selection = TextRange(start + token.length)
+            replace(s.start, end, token)
+            selection = TextRange(s.start + token.length)
         }
         candidates = emptyList()
     }
@@ -456,12 +471,25 @@ fun Composer(
 
     Surface(tonalElevation = 2.dp, color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth()) {
-            if (candidates.isNotEmpty()) {
+            // 候補が 0 件なら何も出さない (送信は妨げない)
+            if (candidates.isNotEmpty() || channelCandidates.isNotEmpty() || emojiCandidates.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
-                    items(candidates, key = { it.id }) { u ->
-                        Row(Modifier.fillMaxWidth().testTag(TestTags.composerMention(u.id)).clickable { insertMention(u) }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(candidates, key = { "u:" + it.id }) { u ->
+                        SuggestRow(TestTags.composerMention(u.id), { insertSuggestion(SuggestKind.USER, u.id) }) {
                             Avatar(u.id, 28.dp)
                             Text(u.displayName)
+                        }
+                    }
+                    items(channelCandidates, key = { "c:" + it.id }) { c ->
+                        SuggestRow(TestTags.composerChannel(c.id), { insertSuggestion(SuggestKind.CHANNEL, c.id) }) {
+                            Text("#", Modifier.widthIn(min = 28.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(c.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    items(emojiCandidates, key = { "e:$it" }) { code ->
+                        SuggestRow(TestTags.composerEmoji(code), { insertSuggestion(SuggestKind.EMOJI, code) }) {
+                            coil3.compose.AsyncImage(model = graph.api.customEmojiUrl(code), contentDescription = null, modifier = Modifier.size(28.dp))
+                            Text(":$code:", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -523,6 +551,17 @@ fun Composer(
     }
 }
 
+/** 候補の 1 行。押せる高さを 48dp 以上にする (D-045 の P-4) */
+@Composable
+private fun SuggestRow(tag: String, onClick: () -> Unit, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        content = content,
+    )
+}
+
 @Composable
 private fun Banner(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -561,19 +600,6 @@ internal fun receiveMedia(content: TransferableContent, onUris: (List<Uri>) -> U
     val rest = content.consume { item -> item.uri?.let { uris += it; true } ?: false }
     if (uris.isNotEmpty()) onUris(uris)
     return rest
-}
-
-/** カーソル直前の "@xxx" を探す。(開始位置, 検索語) を返す */
-internal fun mentionQueryAt(v: TextFieldValue): Pair<Int, String>? {
-    val cursor = v.selection.start
-    if (cursor <= 0 || v.selection.start != v.selection.end) return null
-    val before = v.text.substring(0, cursor)
-    val at = before.lastIndexOf('@')
-    if (at < 0) return null
-    val q = before.substring(at + 1)
-    if (q.isEmpty() || q.any { it.isWhitespace() } || q.startsWith("<")) return null
-    if (at > 0 && !before[at - 1].isWhitespace()) return null
-    return at to q
 }
 
 /** アップロードの進み具合を数える RequestBody */
