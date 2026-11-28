@@ -20,7 +20,7 @@ require('"' !in updateCheckUrl && '\\' !in updateCheckUrl) { "giracle.updateChec
 
 android {
     namespace = "com.giracle.android"
-    // Compose 1.13 (BOM 2026.11.01) が 37.1 以上を求める。targetSdk は 37 のまま (D-088)
+    // Compose 1.13 (BOM 2026.11.01) が 37.1 以上を求める。targetSdk は 37 のまま (D-089)
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }

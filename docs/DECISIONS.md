@@ -1688,7 +1688,7 @@
   最初は子の流れを D-067 に戻して軽くする案を出したが、点検役の「効く場所で D-087 が無くなる」という指摘で取り下げた。上の「判断」の手順の細目は、この縮めた形に置き換える
 
 
-## D-088 compileSdk を 37.2 にする (Compose BOM 2026.11.01 のため。targetSdk は 37 のまま)
+## D-089 compileSdk を 37.2 にする (Compose BOM 2026.11.01 のため。targetSdk は 37 のまま。クリックの操作音の確かめも)
 
 - **きっかけ**: 依存の版上げ (2026-11-28) で Compose BOM を 2026.09.00 → 2026.11.01 (Compose 1.13.0) にしたら、ビルドが
   「`androidx.compose.ui:ui-android:1.13.0` などは compileSdk 37.1 以上を求める」で止まった
@@ -1700,3 +1700,10 @@
 - **代わりの案**: BOM を 2026.09.00 に据え置く (Compose の修正が入らない)。37.1 にする (37.2 を避ける理由が見つからない)
 - **確かめていないこと**: 作業場所の準備の手順 (環境に保存された正本) は直していない (リポジトリの控えだけ直した)。正本を直すまで、新しい会話では 37.2 が無く、
   AGP が自分で取りに行くかは確かめていない
+- **Compose 1.13 のクリックの操作音 (主セッションのレビューで確かめた)**: foundation 1.13 から、クリックできる要素がタップで操作音を鳴らす (リリースノート)。
+  端末の「タッチ操作音」の設定に従うかをソースで確かめた:
+  - foundation-android 1.13.0 の sources jar の `Clickable.kt`: `performClick()` が `LocalSoundEffect` の `playClickSound()` を呼んでから onClick を呼ぶ。鳴るのはタップ (1 回のクリック、キーボードの決定キー) だけで、長押しでは鳴らさない。ダブルクリックを受ける要素では 1 回目のタップで鳴らす
+  - ui-android 1.13.0 の `AndroidSoundEffect.android.kt`: `view.playSoundEffect(SoundEffectConstants.CLICK)` を呼ぶだけ
+  - AOSP (frameworks/base の main): `View.playSoundEffect` → `ViewRootImpl.playSoundEffect` → `AudioManager.playSoundEffect(FX_KEY_CLICK)` → `AudioService.playSoundEffect` が `Settings.System.SOUND_EFFECTS_ENABLED` が 0 なら鳴らさない
+  - 判断: 端末の設定に従い、従来の View のボタンと同じ経路なので、アプリは変えない。スワイプ (返信) はクリックではないので鳴らない。メッセージの行は、タップに onClick がある所ではタッチ操作音がオンの端末で鳴る (View の行と同じ)
+  - 確かめていないこと: 実機で鳴るか・うるさく感じないか。端末の製造元が AOSP の経路を変えている場合
