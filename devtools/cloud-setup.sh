@@ -17,7 +17,7 @@ install_sdk() {
     mv "$t/cmdline-tools" "$SDK/cmdline-tools/latest" &&
     rm -rf "$t" || return 1
   fi
-  "$SDK/cmdline-tools/latest/bin/android" --no-metrics --sdk="$SDK" sdk install "build-tools;36.0.0" "platforms;android-37.0"
+  "$SDK/cmdline-tools/latest/bin/android" --no-metrics --sdk="$SDK" sdk install "build-tools;36.0.0" "platforms;android-37.0" "platforms;android-37.2"
 }
 install_sdk || echo "cloud-setup: Android SDK を入れられなかった" >&2
 # 2. この作業場所でだけ、Maven Central の取得先を Google のミラーに替える (出口が 429 で断られるため。CI は変えない)

@@ -3,7 +3,7 @@
 ## 必要なもの
 
 - JDK 17 以上 (21 で確認)
-- Android SDK (platforms;android-37.0, build-tools;37.0.0)。`local.properties` に `sdk.dir=...`
+- Android SDK (platforms;android-37.2 と android-37.0, build-tools;37.0.0)。`local.properties` に `sdk.dir=...`
 - ローカル検証用: [Bun](https://bun.sh) と Node.js (バックエンドと Web 版を動かす)
 
 ## Claude Code のクラウドの作業場所 (D-083)
